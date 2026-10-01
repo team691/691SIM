@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "homepage": "https://asaxena23757.github.io/691SIM",
+  "homepage": "https://team691.github.io/691SIM",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

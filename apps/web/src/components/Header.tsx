@@ -111,7 +111,7 @@ export function Header({
 
       <a
         className="github-credit"
-        href="https://github.com/asaxena23757/691SIM"
+        href="https://github.com/team691/691SIM"
         target="_blank"
         rel="noopener noreferrer"
       >
