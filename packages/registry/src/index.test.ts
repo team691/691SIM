@@ -34,6 +34,7 @@ describe("builtInDeviceDefinitions", () => {
       "OrangePi",
       "Radio",
       "EthernetSwitch",
+      "CANivore",
     ]);
   });
 
@@ -57,7 +58,7 @@ describe("builtInDeviceDefinitions", () => {
     ).toHaveLength(3);
     expect(
       createDefaultDeviceRegistry().listByCategory(DeviceCategory.NETWORK),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 
   it("describes expected ports for common FRC devices", () => {

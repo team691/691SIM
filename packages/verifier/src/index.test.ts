@@ -2,6 +2,7 @@ import { createHealthyRobotModel, Severity, type RobotModel } from "@691sim/core
 import { describe, expect, it } from "vitest";
 import {
   buildGraph,
+  canVerificationPass,
   DiagnosticCollection,
   getUnpoweredDeviceIds,
   verifyRobotModel,
@@ -197,5 +198,76 @@ describe("verifyRobotModel", () => {
     expect(unpowered).toContain("pdh-1");
     expect(unpowered).toContain("rio-1");
     expect(graph.powerReachable("pdh-1")).toBe(false);
+  });
+
+  it("checks that CANivore devices stay on the CANivore bus", () => {
+    const result = verifyRobotModel(
+      {
+        schemaVersion: 1,
+        id: "canivore-robot",
+        name: "CANivore",
+        devices: [
+          { id: "rio-1", type: "RoboRIO" },
+          { id: "spark-1", type: "SparkMax", metadata: { canId: 2 } },
+          { id: "spark-2", type: "SparkMax", metadata: { canId: 5, canBus: "canivore" } },
+          { id: "pdh-1", type: "PDH", metadata: { canId: 1 } },
+          { id: "canivore-1", type: "CANivore" },
+          { id: "coder-1", type: "CANcoder", metadata: { canId: 3, canBus: "canivore" } },
+          { id: "coder-2", type: "CANcoder", metadata: { canId: 4, canBus: "rio" } },
+        ],
+        connections: [
+          {
+            id: "c1",
+            sourceDevice: "rio-1",
+            sourcePort: "can_bus",
+            targetDevice: "spark-1",
+            targetPort: "can_bus",
+          },
+          {
+            id: "c2",
+            sourceDevice: "spark-1",
+            sourcePort: "can_bus",
+            targetDevice: "spark-2",
+            targetPort: "can_bus",
+          },
+          {
+            id: "c3",
+            sourceDevice: "spark-2",
+            sourcePort: "can_bus",
+            targetDevice: "pdh-1",
+            targetPort: "can_bus",
+          },
+          {
+            id: "c4",
+            sourceDevice: "canivore-1",
+            sourcePort: "can_bus",
+            targetDevice: "coder-1",
+            targetPort: "can_bus",
+          },
+          {
+            id: "c5",
+            sourceDevice: "coder-1",
+            sourcePort: "can_bus",
+            targetDevice: "coder-2",
+            targetPort: "can_bus",
+          },
+        ],
+      },
+      { passes: [canVerificationPass] },
+    );
+    const wrong = result.diagnostics.filter((diagnostic) => diagnostic.code === "CAN_WRONG_BUS");
+    const wrongIds = wrong.flatMap((diagnostic) => diagnostic.deviceIds ?? []);
+    expect(wrongIds).toContain("spark-2");
+    expect(wrongIds).toContain("coder-2");
+    expect(wrongIds).not.toContain("coder-1");
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === "ISOLATED_CAN_SEGMENT")).toBe(
+      false,
+    );
+    expect(
+      result.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "CAN_NOT_REACHABLE" && diagnostic.deviceIds?.includes("coder-1"),
+      ),
+    ).toBe(false);
   });
 });

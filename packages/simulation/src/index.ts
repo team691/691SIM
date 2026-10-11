@@ -19,6 +19,12 @@ import { verifyCanTopology, type CanEdge, type CanTopologyResult } from './canTo
 export * from './components.js';
 export * from './wire.js';
 export * from './voltage.js';
+export * from './network.js';
+export * from './solve.js';
+export * from './limits.js';
+export * from './kraken.js';
+export * from './match.js';
+export * from './swerve.js';
 export * from './canTopology.js';
 
 export const SIMULATION_PACKAGE_NAME = '@691sim/simulation';
@@ -97,6 +103,31 @@ function buildDiagnostics(
         Severity.ERROR,
         `${BROWNOUT_MESSAGE} — system sags to ${voltage.systemVoltage.toFixed(2)}V under ${voltage.totalCurrentAmps.toFixed(1)}A (${voltage.mode}).`,
       ),
+    );
+  }
+
+  if (voltage.firstFailure) {
+    const others = voltage.undervoltage
+      .filter((device) => device.deviceId !== voltage.firstFailure?.deviceId)
+      .map((device) => device.deviceId);
+    const extra = others.length > 0 ? ` Also under the minimum: ${others.join(', ')}.` : '';
+    diagnostics.push(
+      diag(
+        'DEVICE_UNDERVOLTAGE',
+        Severity.ERROR,
+        `${voltage.firstFailure.deviceId} fails first at ${voltage.firstFailure.voltage.toFixed(2)}V, below its ${voltage.firstFailure.minVoltage}V minimum.${extra}`,
+        { deviceIds: voltage.undervoltage.map((device) => device.deviceId) },
+      ),
+    );
+  }
+
+  for (const issue of voltage.issues) {
+    const severity =
+      issue.code === 'POWER_LOOP_DETECTED' || issue.code === 'FLOATING_NODE'
+        ? Severity.WARNING
+        : Severity.ERROR;
+    diagnostics.push(
+      diag(issue.code, severity, issue.message, { deviceIds: issue.deviceIds }),
     );
   }
 

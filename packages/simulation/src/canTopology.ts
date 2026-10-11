@@ -2,6 +2,7 @@ import type { CircuitComponent } from './components.js';
 
 const CONTROLLER_TYPES = new Set(['RoboRIO', 'SystemCore']);
 const TERMINATOR_TYPES = new Set(['PDH', 'PDP']);
+const CANIVORE_TYPE = 'CANivore';
 
 export interface CanEdge {
   connectionId: string;
@@ -15,12 +16,24 @@ export interface CanTopologyIssue {
   deviceIds: string[];
 }
 
+export interface CanBusSegment {
+  /** `roborio`, or `canivore-0`, `canivore-1`, … */
+  id: string;
+  kind: 'roborio' | 'canivore';
+  deviceIds: string[];
+  endpoints: string[];
+  valid: boolean;
+}
+
 export interface CanTopologyResult {
   hasCanBus: boolean;
   isValidChain: boolean;
   terminationOk: boolean;
+  /** Endpoints of the roboRIO bus, or of the only bus when that bus is a CANivore. */
   endpoints: string[];
   segments: number;
+  /** One entry per CAN bus. A CANivore chain is its own entry, not a branch of the roboRIO bus. */
+  buses: CanBusSegment[];
   issues: CanTopologyIssue[];
 }
 
@@ -65,6 +78,7 @@ export function verifyCanTopology(
       terminationOk: true,
       endpoints: [],
       segments: 0,
+      buses: [],
       issues: [],
     };
   }
@@ -122,33 +136,81 @@ export function verifyCanTopology(
     });
   }
 
-  if (componentGroups.length > 1) {
-    for (const group of componentGroups.slice(1)) {
+  const endpointsOf = (group: string[]): string[] =>
+    group.filter((id) => (adjacency.get(id)?.size ?? 0) === 1);
+
+  const isLine = (group: string[]): boolean => {
+    const degrees = group.map((id) => adjacency.get(id)?.size ?? 0);
+    return degrees.every((degree) => degree <= 2) && degrees.filter((degree) => degree === 1).length === 2;
+  };
+
+  const rioGroups = componentGroups.filter((group) => !group.some((id) => typeOf(id) === CANIVORE_TYPE));
+  const canivoreGroups = componentGroups.filter((group) => group.some((id) => typeOf(id) === CANIVORE_TYPE));
+  const mainRio =
+    rioGroups.find((group) => group.some((id) => CONTROLLER_TYPES.has(typeOf(id)))) ?? rioGroups[0];
+
+  for (const group of rioGroups) {
+    if (group === mainRio) continue;
+    issues.push({
+      code: 'CAN_ISOLATED_SEGMENT',
+      message: `Isolated CAN segment not joined to the main bus: ${group.join(', ')}.`,
+      deviceIds: group,
+    });
+  }
+
+  const buses: CanBusSegment[] = [];
+  let rioTerminationOk = true;
+  if (mainRio) {
+    const rioEndpoints = endpointsOf(mainRio);
+    rioTerminationOk =
+      isLine(mainRio) &&
+      rioEndpoints.length === 2 &&
+      rioEndpoints.some((id) => CONTROLLER_TYPES.has(typeOf(id))) &&
+      rioEndpoints.some((id) => TERMINATOR_TYPES.has(typeOf(id)));
+    buses.push({
+      id: 'roborio',
+      kind: 'roborio',
+      deviceIds: mainRio,
+      endpoints: rioEndpoints,
+      valid: rioTerminationOk && !hasLoop && branchNodes.length === 0,
+    });
+    if (!rioTerminationOk && !hasLoop) {
       issues.push({
-        code: 'CAN_ISOLATED_SEGMENT',
-        message: `Isolated CAN segment not joined to the main bus: ${group.join(', ')}.`,
-        deviceIds: group,
+        code: 'CAN_MISSING_TERMINATION',
+        message:
+          'CAN chain is not terminated correctly. It should start at the roboRIO and end at the PDH/PDP with a 120Ω terminating resistor at each end.',
+        deviceIds: mainRio,
       });
     }
   }
 
-  const endpoints = nodes.filter((id) => (adjacency.get(id)?.size ?? 0) === 1);
-  const rioIsEndpoint = endpoints.some((id) => CONTROLLER_TYPES.has(typeOf(id)));
-  const terminatorIsEndpoint = endpoints.some((id) => TERMINATOR_TYPES.has(typeOf(id)));
-  const terminationOk =
-    endpoints.length === 2 && rioIsEndpoint && terminatorIsEndpoint;
-
-  if (!terminationOk && !hasLoop) {
-    issues.push({
-      code: 'CAN_MISSING_TERMINATION',
-      message:
-        'CAN chain is not terminated correctly. It should start at the roboRIO and end at the PDH/PDP with a 120Ω terminating resistor at each end.',
-      deviceIds: nodes,
+  let canivoreBusesOk = true;
+  canivoreGroups.forEach((group, index) => {
+    const busEndpoints = endpointsOf(group);
+    const branched = group.some((id) => (adjacency.get(id)?.size ?? 0) > 2);
+    const valid = isLine(group) && busEndpoints.some((id) => typeOf(id) === CANIVORE_TYPE) && !hasLoop && !branched;
+    if (!valid) canivoreBusesOk = false;
+    buses.push({
+      id: `canivore-${index}`,
+      kind: 'canivore',
+      deviceIds: group,
+      endpoints: busEndpoints,
+      valid,
     });
-  }
+    if (!valid && !hasLoop && !branched) {
+      issues.push({
+        code: 'CAN_BUS_INVALID',
+        message:
+          'CANivore bus must be its own daisy chain with the CANivore at one end, not a branch of the roboRIO bus.',
+        deviceIds: group,
+      });
+    }
+  });
 
+  const endpoints = mainRio ? endpointsOf(mainRio) : (buses[0]?.endpoints ?? []);
+  const terminationOk = rioTerminationOk && canivoreBusesOk;
   const isValidChain =
-    componentGroups.length === 1 &&
+    rioGroups.filter((group) => group !== mainRio).length === 0 &&
     branchNodes.length === 0 &&
     !hasLoop &&
     terminationOk;
@@ -159,6 +221,7 @@ export function verifyCanTopology(
     terminationOk,
     endpoints,
     segments: componentGroups.length,
+    buses,
     issues,
   };
 }

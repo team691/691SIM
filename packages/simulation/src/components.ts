@@ -1,4 +1,7 @@
 import { DeviceCategory, type DeviceDefinition, type DeviceInstance } from '@691sim/core';
+import type { KrakenVariant } from './kraken.js';
+import { readTalonVariant } from './kraken.js';
+import { minVoltageForType } from './limits.js';
 
 /** Whether a component is evaluated at its steady-state or worst-case draw. */
 export type LoadMode = 'continuous' | 'peak';
@@ -34,6 +37,8 @@ const CURRENT_DEFAULTS: Record<string, CurrentProfile> = {
   OrangePi: { continuousAmps: 2, peakAmps: 3, maxVoltage: DEFAULT_MAX_VOLTAGE },
   Radio: { continuousAmps: 1, peakAmps: 1.5, maxVoltage: DEFAULT_MAX_VOLTAGE },
   EthernetSwitch: { continuousAmps: 0.5, peakAmps: 0.7, maxVoltage: DEFAULT_MAX_VOLTAGE },
+  // TODO(arihant): datasheet value
+  CANivore: { continuousAmps: 0, peakAmps: 0, maxVoltage: DEFAULT_MAX_VOLTAGE },
 };
 
 const FALLBACK_PROFILE: CurrentProfile = {
@@ -49,6 +54,8 @@ export interface ComponentInit {
   maxVoltage: number;
   continuousCurrentAmps: number;
   peakCurrentAmps: number;
+  /** Null until a datasheet minimum is known. The roboRIO uses 6.3 V. */
+  minVoltage: number | null;
 }
 
 /**
@@ -63,6 +70,8 @@ export abstract class CircuitComponent {
   maxVoltage: number;
   continuousCurrentAmps: number;
   peakCurrentAmps: number;
+  /** Lowest acceptable bus voltage. Null means the datasheet value is not entered yet. */
+  minVoltage: number | null;
 
   constructor(init: ComponentInit) {
     this.id = init.id;
@@ -71,6 +80,7 @@ export abstract class CircuitComponent {
     this.maxVoltage = init.maxVoltage;
     this.continuousCurrentAmps = init.continuousCurrentAmps;
     this.peakCurrentAmps = init.peakCurrentAmps;
+    this.minVoltage = init.minVoltage;
   }
 
   /** Current this component draws from the 12V bus in the given load mode. */
@@ -122,8 +132,32 @@ export class VoltageRegulator extends CircuitComponent {
   readonly category = 'voltage-regulator';
 }
 
+export interface MotorBehavior {
+  variant?: KrakenVariant;
+  /** Set when metadata names a variant that is not X60 or X44. */
+  variantError?: string;
+  statorCurrentAmps?: number;
+  dutyCycle?: number;
+  supplyLimitAmps?: number;
+}
+
 export class MotorController extends CircuitComponent {
   readonly category = 'motor-controller';
+  /** TalonFX only. Defaults to X60 when metadata omits `variant`. */
+  readonly variant: KrakenVariant | undefined;
+  readonly variantError: string | undefined;
+  readonly statorCurrentAmps: number | undefined;
+  readonly dutyCycle: number | undefined;
+  readonly supplyLimitAmps: number | undefined;
+
+  constructor(init: ComponentInit, behavior: MotorBehavior = {}) {
+    super(init);
+    this.variant = behavior.variant;
+    this.variantError = behavior.variantError;
+    this.statorCurrentAmps = behavior.statorCurrentAmps;
+    this.dutyCycle = behavior.dutyCycle;
+    this.supplyLimitAmps = behavior.supplyLimitAmps;
+  }
 }
 
 export class GenericLoad extends CircuitComponent {
@@ -150,6 +184,16 @@ export class Breaker extends CircuitComponent {
 
 function num(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function resolveMinVoltage(instance: DeviceInstance): number | null {
+  const override = instance.metadata?.minVoltage;
+  if (typeof override === 'number' && Number.isFinite(override)) return override;
+  return minVoltageForType(instance.type);
 }
 
 function resolveProfile(
@@ -199,6 +243,7 @@ export function createComponent(
     maxVoltage: profile.maxVoltage,
     continuousCurrentAmps: profile.continuousAmps,
     peakCurrentAmps: profile.peakAmps,
+    minVoltage: resolveMinVoltage(instance),
   };
 
   switch (instance.type) {
@@ -222,8 +267,17 @@ export function createComponent(
     }
     case 'SparkMax':
     case 'SparkFlex':
-    case 'TalonFX':
       return new MotorController(init);
+    case 'TalonFX': {
+      const parsed = readTalonVariant(instance.metadata);
+      return new MotorController(init, {
+        variant: parsed.ok ? parsed.variant : undefined,
+        variantError: parsed.ok ? undefined : parsed.message,
+        statorCurrentAmps: optionalNumber(instance.metadata?.statorCurrentAmps),
+        dutyCycle: optionalNumber(instance.metadata?.dutyCycle),
+        supplyLimitAmps: optionalNumber(instance.metadata?.supplyLimitAmps),
+      });
+    }
     default:
       if (definition?.category === DeviceCategory.MOTOR_CONTROLLER) return new MotorController(init);
       if (definition?.category === DeviceCategory.POWER) return new PowerDistribution(init);

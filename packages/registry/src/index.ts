@@ -411,6 +411,24 @@ export const builtInDeviceDefinitions: DeviceDefinition[] = [
       weightLbs: 0.4,
     },
   },
+  {
+    type: "CANivore",
+    displayName: "CANivore",
+    category: DeviceCategory.NETWORK,
+    ports: [
+      powerInput(),
+      groundInput(),
+      canPort("can_bus", 2, true),
+      port("usb", PortType.USBA, PortDirection.BIDIRECTIONAL, false, 1),
+    ],
+    requirements: poweredDeviceRequirements(),
+    metadata: {
+      manufacturer: "CTR Electronics",
+      role: "can-bus",
+      // TODO(arihant): datasheet value
+      note: "Second CAN bus. Devices on this bus are not on the roboRIO daisy chain.",
+    },
+  },
 ];
 
 export class DeviceRegistry {

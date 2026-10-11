@@ -781,16 +781,46 @@ export const canVerificationPass: VerificationPass = {
       }
     }
 
+    const canComponents = graph.connectedComponents(PortType.CAN);
+    const componentOf = (deviceId: string): DeviceNode[] =>
+      canComponents.find((component) => component.some((device) => device.id === deviceId)) ?? [];
+    const busChoice = (device: DeviceNode): "rio" | "canivore" =>
+      device.instance.metadata?.canBus === "canivore" ? "canivore" : "rio";
+
     for (const device of canDevices) {
-      if (isController(device)) {
+      if (isController(device) || device.definition.type === "CANivore") {
         continue;
       }
 
+      const group = componentOf(device.id);
+      const onCanivore = group.some((member) => member.definition.type === "CANivore");
+      const onRio = group.some(isController);
+      const declared = busChoice(device);
       const requiresCan = (device.definition.requirements ?? []).some(
         (requirement) => requirement.portType === PortType.CAN,
       );
 
-      if (requiresCan && !graph.canReachable(device.id)) {
+      if (declared === "canivore" && (!onCanivore || onRio)) {
+        diagnostics.push(
+          diagnostic(
+            "CAN_WRONG_BUS",
+            Severity.ERROR,
+            onRio
+              ? `${device.id} is marked for the CANivore bus but shares the roboRIO CAN chain.`
+              : `${device.id} is marked for the CANivore bus but is not wired to a CANivore.`,
+            { deviceIds: [device.id] },
+          ),
+        );
+      } else if (declared === "rio" && onCanivore) {
+        diagnostics.push(
+          diagnostic(
+            "CAN_WRONG_BUS",
+            Severity.ERROR,
+            `${device.id} is on the CANivore bus. Mark it with canBus: 'canivore', or move it to the roboRIO chain.`,
+            { deviceIds: [device.id] },
+          ),
+        );
+      } else if (requiresCan && declared === "rio" && !graph.canReachable(device.id)) {
         diagnostics.push(
           diagnostic(
             "CAN_NOT_REACHABLE",
@@ -802,12 +832,12 @@ export const canVerificationPass: VerificationPass = {
       }
     }
 
-    const isolatedCanComponents = graph
-      .connectedComponents(PortType.CAN)
+    const isolatedCanComponents = canComponents
       .filter(
         (component) =>
           component.some((device) => deviceHasPortType(device, PortType.CAN)) &&
-          !component.some(isController),
+          !component.some(isController) &&
+          !component.some((device) => device.definition.type === "CANivore"),
       );
 
     for (const component of isolatedCanComponents) {

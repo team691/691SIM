@@ -1,4 +1,14 @@
-import { Battery, Breaker, type CircuitComponent, type LoadMode } from './components.js';
+import {
+  Battery,
+  Breaker,
+  MotorController,
+  type CircuitComponent,
+  type LoadMode,
+} from './components.js';
+import { resolveTalonBusCurrent } from './kraken.js';
+import { evaluateUndervoltage, type UndervoltageDevice } from './limits.js';
+import { breakerLineNodeId, buildPowerNetwork } from './network.js';
+import { solvePowerNetwork, type VoltageIssue } from './solve.js';
 import type { SimWire } from './wire.js';
 
 /** RoboRIO brownout protection begins around 6.3V. */
@@ -18,11 +28,21 @@ export interface WireCurrentResult {
   to: string;
   gauge: number;
   lengthInches: number;
+  /**
+   * Round-trip resistance stamped into the solver (supply conductor + return
+   * conductor). Current is not doubled: the same amps flow out and back.
+   */
   resistanceOhms: number;
   currentAmps: number;
   voltageDrop: number;
   maxAmps: number;
   exceedsAmpacity: boolean;
+}
+
+export interface DeviceVoltage {
+  deviceId: string;
+  /** Null when the device is floating or the network could not be solved. */
+  voltage: number | null;
 }
 
 export interface VoltageSimResult {
@@ -32,87 +52,96 @@ export interface VoltageSimResult {
   internalResistanceOhms: number;
   totalCurrentAmps: number;
   internalVoltageDrop: number;
+  /**
+   * Drop from the battery terminal to the lowest solved device. This is the
+   * shared path plus that device's own branch, not the sum of every wire.
+   */
   wireVoltageDropTotal: number;
+  /** Lowest solved device voltage. The per-device values live on `deviceVoltages`. */
   systemVoltage: number;
   brownoutThreshold: number;
   brownoutRisk: boolean;
   wireCurrents: WireCurrentResult[];
+  deviceVoltages: DeviceVoltage[];
+  issues: VoltageIssue[];
+  /** Devices below their datasheet minimum, deepest deficit first. */
+  undervoltage: UndervoltageDevice[];
+  /** The undervoltage device with the largest deficit, or null if none. */
+  firstFailure: UndervoltageDevice | null;
 }
 
 /**
- * Dynamic voltage-drop / brownout engine.
+ * Per-device voltage from the nodal network.
  *
- * Implements V_system = V_battery − (I_total · R_internal) − Σ(I_branch · R_wire)
- * where each wire's branch current is the total draw of everything downstream
- * of it on the power tree. Pure function — no UI or registry dependencies.
+ * Each load is a current sink at its own node. A wire contributes 2·R, so the
+ * return conductor is in the drop, and only wires on the path to that node
+ * move its voltage. `systemVoltage` remains the lowest of those voltages so
+ * existing brownout checks still have one number to read.
  */
 export function simulateVoltage(
   components: Map<string, CircuitComponent>,
   powerEdges: PowerEdge[],
   mode: LoadMode = 'peak',
+  loadOverride?: ReadonlyMap<string, number>,
 ): VoltageSimResult {
   const battery = [...components.values()].find(
     (component): component is Battery => component instanceof Battery,
   );
-
-  // Downstream power adjacency (source output -> target input).
-  const children = new Map<string, PowerEdge[]>();
-  for (const edge of powerEdges) {
-    const list = children.get(edge.from) ?? [];
-    list.push(edge);
-    children.set(edge.from, list);
+  const batteryVoltage = battery?.nominalVoltage ?? 12.6;
+  const internalResistanceOhms = battery?.internalResistanceOhms ?? 0.011;
+  const loads = resolveLoads(components, mode, loadOverride);
+  if (!loads.ok) {
+    return unsolvedResult(components, mode, battery, batteryVoltage, internalResistanceOhms, loads.issues);
   }
 
-  const memo = new Map<string, number>();
-  const downstreamCurrent = (deviceId: string, stack: Set<string>): number => {
-    const cached = memo.get(deviceId);
-    if (cached !== undefined) return cached;
-    if (stack.has(deviceId)) return 0; // guard against wiring loops
+  const network = buildPowerNetwork(components, powerEdges);
+  const solution = solvePowerNetwork(network, loads.amps);
 
-    stack.add(deviceId);
-    let total = components.get(deviceId)?.currentDraw(mode) ?? 0;
+  const deviceVoltages: DeviceVoltage[] = [...components.values()].map((component) => ({
+    deviceId: component.id,
+    voltage: deviceVoltage(component, solution.voltageByNode),
+  }));
 
-    const component = components.get(deviceId);
-    if (component instanceof Breaker && component.blocksDownstreamPower()) {
-      stack.delete(deviceId);
-      memo.set(deviceId, total);
-      return total;
+  const solvedVoltages = deviceVoltages.flatMap((device) =>
+    device.voltage === null ? [] : [device.voltage],
+  );
+  const systemVoltage = solvedVoltages.length > 0 ? Math.min(...solvedVoltages) : batteryVoltage;
+
+  // Constant-current loads make battery current equal the sum of every load
+  // that actually has a path to the source. That sum is exact; inferring it
+  // from (v_s - v_terminal) / R_int would pick up elimination roundoff.
+  let totalCurrentAmps = 0;
+  if (solution.solved) {
+    for (const component of components.values()) {
+      if (!solution.voltageByNode.has(component.id)) continue;
+      totalCurrentAmps += loads.amps.get(component.id) ?? 0;
     }
-
-    for (const edge of children.get(deviceId) ?? []) {
-      total += downstreamCurrent(edge.to, stack);
-    }
-    stack.delete(deviceId);
-    memo.set(deviceId, total);
-    return total;
-  };
-
-  const totalCurrentAmps = battery
-    ? downstreamCurrent(battery.id, new Set())
-    : [...components.values()].reduce((sum, c) => sum + c.currentDraw(mode), 0);
+  }
+  const internalVoltageDrop = totalCurrentAmps * internalResistanceOhms;
+  const wireVoltageDropTotal = batteryVoltage - internalVoltageDrop - systemVoltage;
 
   const wireCurrents: WireCurrentResult[] = powerEdges.map((edge) => {
-    const currentAmps = downstreamCurrent(edge.to, new Set());
-    const resistanceOhms = edge.wire.resistanceOhms;
+    const resistor = network.resistors.find((candidate) => candidate.connectionId === edge.connectionId);
+    const roundTripOhms = resistor?.resistanceOhms ?? edge.wire.resistanceOhms * 2;
+    const fromVoltage = resistor ? solution.voltageByNode.get(resistor.from) : undefined;
+    const toVoltage = resistor ? solution.voltageByNode.get(resistor.to) : undefined;
+    const currentAmps =
+      fromVoltage !== undefined && toVoltage !== undefined && roundTripOhms > 0
+        ? Math.abs(fromVoltage - toVoltage) / roundTripOhms
+        : 0;
     return {
       connectionId: edge.connectionId,
       from: edge.from,
       to: edge.to,
       gauge: edge.wire.gauge,
       lengthInches: edge.wire.lengthInches,
-      resistanceOhms,
+      resistanceOhms: roundTripOhms,
       currentAmps,
-      voltageDrop: edge.wire.voltageDrop(currentAmps),
+      voltageDrop: currentAmps * roundTripOhms,
       maxAmps: edge.wire.maxAmps,
       exceedsAmpacity: edge.wire.exceedsAmpacity(currentAmps),
     };
   });
-
-  const wireVoltageDropTotal = wireCurrents.reduce((sum, w) => sum + w.voltageDrop, 0);
-  const batteryVoltage = battery?.nominalVoltage ?? 12.6;
-  const internalResistanceOhms = battery?.internalResistanceOhms ?? 0.011;
-  const internalVoltageDrop = totalCurrentAmps * internalResistanceOhms;
-  const systemVoltage = batteryVoltage - internalVoltageDrop - wireVoltageDropTotal;
 
   return {
     hasBattery: battery !== undefined,
@@ -124,7 +153,117 @@ export function simulateVoltage(
     wireVoltageDropTotal,
     systemVoltage,
     brownoutThreshold: BROWNOUT_VOLTAGE_THRESHOLD,
-    brownoutRisk: battery !== undefined && systemVoltage < BROWNOUT_VOLTAGE_THRESHOLD,
+    brownoutRisk: battery !== undefined && solution.solved && systemVoltage < BROWNOUT_VOLTAGE_THRESHOLD,
     wireCurrents,
+    deviceVoltages,
+    issues: solution.issues,
+    ...evaluateUndervoltage(
+      deviceVoltages.map((row) => ({
+        deviceId: row.deviceId,
+        type: components.get(row.deviceId)?.type ?? '',
+        voltage: row.voltage,
+        minVoltage: components.get(row.deviceId)?.minVoltage ?? null,
+      })),
+    ),
   };
+}
+
+function resolveLoads(
+  components: Map<string, CircuitComponent>,
+  mode: LoadMode,
+  loadOverride: ReadonlyMap<string, number> | undefined,
+): { ok: true; amps: Map<string, number> } | { ok: false; issues: VoltageIssue[] } {
+  const amps = new Map<string, number>();
+  const issues: VoltageIssue[] = [];
+  for (const component of components.values()) {
+    const override = loadOverride?.get(component.id);
+    if (override !== undefined) {
+      amps.set(component.id, override);
+      continue;
+    }
+    const resolved = busLoadAmps(component, mode);
+    if (!resolved.ok) {
+      issues.push(resolved.issue);
+      continue;
+    }
+    amps.set(component.id, resolved.amps);
+  }
+  if (issues.length > 0) return { ok: false, issues };
+  return { ok: true, amps };
+}
+
+/**
+ * Legacy devices use continuous/peak draw. A Talon with a stator current
+ * contributes its supply current instead, which can refuse the sim.
+ */
+function busLoadAmps(
+  component: CircuitComponent,
+  mode: LoadMode,
+): { ok: true; amps: number } | { ok: false; issue: VoltageIssue } {
+  if (component instanceof MotorController && component.type === 'TalonFX' && component.variant) {
+    return resolveTalonBusCurrent({
+      deviceId: component.id,
+      variant: component.variant,
+      variantError: component.variantError,
+      statorCurrentAmps: component.statorCurrentAmps,
+      dutyCycle: component.dutyCycle,
+      supplyLimitAmps: component.supplyLimitAmps,
+      legacyAmps: component.currentDraw(mode),
+    });
+  }
+  if (component instanceof MotorController && component.variantError) {
+    return {
+      ok: false,
+      issue: {
+        code: 'TALON_SUPPLY_UNRESOLVED',
+        message: component.variantError,
+        deviceIds: [component.id],
+      },
+    };
+  }
+  return { ok: true, amps: component.currentDraw(mode) };
+}
+
+function unsolvedResult(
+  components: Map<string, CircuitComponent>,
+  mode: LoadMode,
+  battery: Battery | undefined,
+  batteryVoltage: number,
+  internalResistanceOhms: number,
+  issues: VoltageIssue[],
+): VoltageSimResult {
+  return {
+    hasBattery: battery !== undefined,
+    mode,
+    batteryVoltage,
+    internalResistanceOhms,
+    totalCurrentAmps: 0,
+    internalVoltageDrop: 0,
+    wireVoltageDropTotal: 0,
+    systemVoltage: batteryVoltage,
+    brownoutThreshold: BROWNOUT_VOLTAGE_THRESHOLD,
+    brownoutRisk: false,
+    wireCurrents: [],
+    deviceVoltages: [...components.values()].map((component) => ({
+      deviceId: component.id,
+      voltage: null,
+    })),
+    issues,
+    undervoltage: [],
+    firstFailure: null,
+  };
+}
+
+/**
+ * Device voltage is the load-side node. An open breaker has no load-side
+ * solution, so the line-side stud is reported instead when that stud is powered.
+ */
+function deviceVoltage(component: CircuitComponent, voltageByNode: ReadonlyMap<string, number>): number | null {
+  const direct = voltageByNode.get(component.id);
+  if (direct !== undefined) return direct;
+  if (component instanceof Breaker) {
+    const line = voltageByNode.get(breakerLineNodeId(component.id));
+    if (line !== undefined) return line;
+  }
+  return null;
 }
