@@ -1,6 +1,7 @@
 import battery from '../../../../component-images/battery/battery.png';
 import breaker120 from '../../../../component-images/breaker120/breaker120.png';
 import cancoder from '../../../../component-images/cancoder/cancoder.png';
+import canivore from '../../../../component-images/canivore/canivore.png';
 import ethswitch from '../../../../component-images/ethswitch/ethswitch.png';
 import limelight from '../../../../component-images/limelight/limelight.png';
 import orangepi from '../../../../component-images/orangepi/orangepi.png';
@@ -24,6 +25,7 @@ const DEVICE_IMAGES: Record<string, string> = {
   Battery: battery,
   MainBreaker: breaker120,
   CANcoder: cancoder,
+  CANivore: canivore,
   EthernetSwitch: ethswitch,
   Limelight: limelight,
   OrangePi: orangepi,

@@ -47,6 +47,7 @@ const DISPLAY: Record<string, { folder: string; width: number }> = {
   OrangePi: { folder: 'orangepi', width: 105 },
   Radio: { folder: 'radio', width: 115 },
   EthernetSwitch: { folder: 'ethswitch', width: 110 },
+  CANivore: { folder: 'canivore', width: 120 },
 };
 
 /**
@@ -168,6 +169,7 @@ const ALIASES: Record<string, Record<string, Alias>> = {
     eth_3: 'ETH4',
     eth_4: 'ETH5',
   },
+  CANivore: { power_in: 'V+', ground: 'V-', can_bus: 'CANH', usb: 'USB-C' },
 };
 
 export interface DeviceLayout {

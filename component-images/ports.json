@@ -1340,6 +1340,40 @@
           "y": 44
         }
       }
+    },
+    "canivore": {
+      "description": "CTRE CANivore USB-to-CAN FD adapter",
+      "image": "canivore/canivore.png",
+      "width": 620,
+      "height": 400,
+      "port_count": 5,
+      "ports": {
+        "USB-C": {
+          "side": "left",
+          "x": 52,
+          "y": 196
+        },
+        "V+": {
+          "side": "right",
+          "x": 576,
+          "y": 116.0
+        },
+        "V-": {
+          "side": "right",
+          "x": 576,
+          "y": 164.0
+        },
+        "CANH": {
+          "side": "right",
+          "x": 576,
+          "y": 212.0
+        },
+        "CANL": {
+          "side": "right",
+          "x": 576,
+          "y": 260.0
+        }
+      }
     }
   }
 }

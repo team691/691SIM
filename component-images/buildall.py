@@ -12,7 +12,7 @@ PARTS = [
     "pdh", "pdp", "vrm", "battery", "breaker120",
     "roborio", "systemcore", "sparkmax", "sparkflex", "talonfx",
     "cancoder", "pigeon2", "limelight", "photonvision", "orangepi",
-    "radio", "ethswitch",
+    "radio", "ethswitch", "canivore",
 ]
 
 DESC = {
@@ -33,6 +33,7 @@ DESC = {
     "orangepi":     "Orange Pi 5 vision coprocessor",
     "radio":        "Vivid-Hosting VH-109 FRC radio",
     "ethswitch":    "Generic 5-port unmanaged Ethernet switch",
+    "canivore":     "CTRE CANivore USB-to-CAN FD adapter",
 }
 
 combined = {
