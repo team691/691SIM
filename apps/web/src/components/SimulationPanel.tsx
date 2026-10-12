@@ -1,7 +1,8 @@
+import { PortType } from '@691sim/core';
+import { minVoltageForType } from '@691sim/simulation';
 import type { RobotModelState } from '../hooks/useRobotModel';
 import { getFuseRatingAmps, getPdhFuseInfo } from '../utils/fuses';
 import { resolveConnectionPortType } from '../utils/wireStyles';
-import { PortType } from '@691sim/core';
 
 interface SimulationPanelProps {
   state: RobotModelState;
@@ -51,6 +52,13 @@ export function SimulationPanel({ state }: SimulationPanelProps) {
         <div className="sim-alert sim-alert-danger">⚠ ROBORIO BROWNOUT RISK DETECTED</div>
       )}
 
+      {voltage.firstFailure && (
+        <div className="sim-alert sim-alert-danger">
+          {voltage.firstFailure.deviceId} fails first at {voltage.firstFailure.voltage.toFixed(2)} V, below its{' '}
+          {voltage.firstFailure.minVoltage} V minimum.
+        </div>
+      )}
+
       {breakerOpen.length > 0 && (
         <div className="sim-alert sim-alert-danger">
           Breaker is stopping current flow on {breakerOpen.map((d) => d.deviceIds?.[0]).filter(Boolean).join(', ')}.
@@ -84,12 +92,65 @@ export function SimulationPanel({ state }: SimulationPanelProps) {
             Internal drop (I·R_int): −{voltage.internalVoltageDrop.toFixed(2)} V
             <small>R_internal = {voltage.internalResistanceOhms} Ω</small>
           </li>
-          <li>Wire drop Σ(I·R_wire): −{voltage.wireVoltageDropTotal.toFixed(2)} V</li>
+          <li>
+            Drop to lowest device: −{voltage.wireVoltageDropTotal.toFixed(2)} V
+            <small>Shared path plus that device&apos;s own wires. Other branches are not added in.</small>
+          </li>
           <li>
             <strong>V_system = {voltage.systemVoltage.toFixed(2)} V</strong>
             <small>Brownout threshold {voltage.brownoutThreshold} V</small>
           </li>
         </ul>
+      </div>
+
+      <div className="field">
+        <label>Device Voltages</label>
+        {voltage.deviceVoltages.length === 0 ? (
+          <div className="muted-line">No devices to solve.</div>
+        ) : (
+          <table className="sim-wire-table">
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Voltage</th>
+                <th>Minimum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {voltage.deviceVoltages.map((row) => {
+                const placed = model.devices.find((device) => device.id === row.deviceId);
+                const name = placed?.label || row.deviceId;
+                const typeName = deviceTypes.get(row.deviceId) ?? placed?.type;
+                const metadataMin = placed?.metadata?.minVoltage;
+                const minimum =
+                  typeof metadataMin === 'number'
+                    ? metadataMin
+                    : typeName
+                      ? minVoltageForType(typeName)
+                      : null;
+                const failure = voltage.undervoltage.find((device) => device.deviceId === row.deviceId);
+                const failsFirst = voltage.firstFailure?.deviceId === row.deviceId;
+                return (
+                  <tr key={row.deviceId} className={failure ? 'sim-wire-hazard' : ''}>
+                    <td>
+                      {name}
+                      {placed?.label ? <small style={{ display: 'block' }}>{row.deviceId}</small> : null}
+                      {failsFirst ? ' · fails first' : ''}
+                    </td>
+                    <td>{row.voltage === null ? '—' : `${row.voltage.toFixed(2)} V`}</td>
+                    <td>{minimum === null ? '—' : `${minimum.toFixed(1)} V`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {voltage.issues.length > 0 &&
+          voltage.issues.map((issue) => (
+            <div key={issue.code + issue.deviceIds.join(',')} className="muted-line" style={{ color: 'var(--danger)' }}>
+              {issue.message}
+            </div>
+          ))}
       </div>
 
       <div className="field">
@@ -106,6 +167,16 @@ export function SimulationPanel({ state }: SimulationPanelProps) {
                 {can.terminationOk ? '120Ω termination OK' : 'Termination issue'}
               </span>
             </div>
+            {can.buses.length > 0 && (
+              <ul className="info-list">
+                {can.buses.map((bus) => (
+                  <li key={bus.id}>
+                    {bus.kind === 'canivore' ? 'CANivore' : 'roboRIO'} bus
+                    {bus.valid ? '' : ' (invalid)'}: {bus.deviceIds.join(', ')}
+                  </li>
+                ))}
+              </ul>
+            )}
             {can.issues.map((issue, i) => (
               <div key={i} className="muted-line" style={{ color: 'var(--danger)' }}>
                 {issue.message}

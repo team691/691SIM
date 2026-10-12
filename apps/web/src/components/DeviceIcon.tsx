@@ -23,6 +23,7 @@ const palette: Record<string, { fill: string; accent: string; label: string }> =
   OrangePi: { fill: '#7c2d12', accent: '#fb923c', label: 'OPI' },
   Radio: { fill: '#0f172a', accent: '#3b82f6', label: 'RAD' },
   EthernetSwitch: { fill: '#1e293b', accent: '#64748b', label: 'SW' },
+  CANivore: { fill: '#134e4a', accent: '#2dd4bf', label: 'CAN' },
 };
 
 export function DeviceIcon({ type, size = 56 }: DeviceIconProps) {
