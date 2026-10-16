@@ -697,12 +697,29 @@
   position: relative;
   flex: 1;
   overflow: auto;
+  touch-action: none;
+  cursor: grab;
   background:
     var(--canvas-wash),
     linear-gradient(var(--canvas-grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
     linear-gradient(90deg, var(--canvas-grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
     var(--bg-canvas);
   min-height: 400px;
+}
+
+.canvas.canvas-panning,
+.canvas.canvas-space-pan {
+  cursor: grabbing;
+}
+
+/* Device bodies keep their own grab cursor; restore grab on empty canvas. */
+.canvas .device-body {
+  cursor: grab;
+}
+
+.canvas.canvas-space-pan .device-body,
+.canvas.canvas-panning .device-body {
+  cursor: grabbing;
 }
 
 .canvas-svg {
@@ -736,6 +753,28 @@
 }
 
 .fuse-marker {
+  pointer-events: none;
+}
+
+.ampacity-marker {
+  pointer-events: none;
+}
+
+.canvas-markers,
+.canvas-labels {
+  pointer-events: none;
+}
+
+.wire-label-bg {
+  opacity: 0.97;
+}
+
+.wire-label-crowded .wire-label-bg {
+  opacity: 1;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--bg-panel) 80%, transparent));
+}
+
+.wire-label-leader {
   pointer-events: none;
 }
 

@@ -42,6 +42,22 @@ export interface LabelPlacementRequest {
   anchor: Point;
   text: string;
   detail?: string;
+  /** Own wire segments with this id are not treated as obstacles. */
+  connectionId?: string;
+}
+
+/** Rect obstacle for label placement. Own-wire obstacles are skipped per label. */
+export interface LabelObstacle {
+  rect: Rect;
+  /** When set, labels for this connection ignore the obstacle (their own wire). */
+  connectionId?: string;
+  kind?: 'device' | 'fuse' | 'ampacity' | 'caption' | 'wire' | 'other';
+}
+
+export interface LabelPlacementResult {
+  positions: Map<string, Point>;
+  /** Labels that could not find a free slot (least-overlap fallback used). */
+  crowded: Set<string>;
 }
 
 type RegistryLookup = {
@@ -561,14 +577,146 @@ function applyWireSeparation(routes: RoutedSegment[]): void {
   }
 }
 
+const LABEL_FONT_PRIMARY = '600 9px ui-sans-serif, system-ui, sans-serif';
+const LABEL_FONT_DETAIL = '400 7.5px ui-sans-serif, system-ui, sans-serif';
+const LABEL_PAD_X = 10;
+const LABEL_MIN_WIDTH = 40;
+const LABEL_LINE_HEIGHT = 11;
+const LABEL_PAD_Y = 6;
+
+const LABEL_RING_STEP = 12;
+const LABEL_MAX_RADIUS = 96;
+const LABEL_ANGLE_STEP_DEG = 45;
+
+const FUSE_MARKER_W = 36;
+const FUSE_MARKER_H = 20;
+const AMPACITY_MARKER_W = 18;
+const AMPACITY_MARKER_H = 16;
+const CAPTION_HEIGHT = 16;
+const WIRE_OBSTACLE_THICKNESS = 4;
+
+const textWidthCache = new Map<string, number>();
+let measureCtx: { font: string; measureText(text: string): { width: number } } | null | undefined;
+
+function getMeasureContext(): typeof measureCtx {
+  if (measureCtx !== undefined) return measureCtx;
+  try {
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const canvas = new OffscreenCanvas(1, 1);
+      measureCtx = canvas.getContext('2d');
+      return measureCtx;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    if (typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      measureCtx = canvas.getContext('2d');
+      return measureCtx;
+    }
+  } catch {
+    /* fall through */
+  }
+  measureCtx = null;
+  return null;
+}
+
+/** Measured text width with cache; falls back to chars × 5.5 when no canvas exists (e.g. vitest). */
+export function measureLabelTextWidth(text: string, font: string = LABEL_FONT_PRIMARY): number {
+  const key = `${font}\0${text}`;
+  const cached = textWidthCache.get(key);
+  if (cached != null) return cached;
+
+  const ctx = getMeasureContext();
+  let width: number;
+  if (ctx) {
+    ctx.font = font;
+    width = ctx.measureText(text).width;
+  } else {
+    width = text.length * 5.5;
+  }
+  textWidthCache.set(key, width);
+  return width;
+}
+
+/** Clear the measureText cache (tests). */
+export function clearLabelTextWidthCache(): void {
+  textWidthCache.clear();
+}
+
 export function estimateLabelBounds(text: string, detail?: string): Rect {
-  const lines = detail ? [text, detail] : [text];
-  const height = lines.length * 11 + 6;
-  const width = Math.max(...lines.map((l) => l.length * 5.5), 40) + 10;
+  const primaryW = measureLabelTextWidth(text, LABEL_FONT_PRIMARY);
+  const detailW = detail ? measureLabelTextWidth(detail, LABEL_FONT_DETAIL) : 0;
+  const lines = detail ? 2 : 1;
+  const height = lines * LABEL_LINE_HEIGHT + LABEL_PAD_Y;
+  const width = Math.max(primaryW, detailW, LABEL_MIN_WIDTH) + LABEL_PAD_X;
   return { x: 0, y: 0, width, height };
 }
 
-function rectsOverlap(a: Rect, ax: number, ay: number, b: Rect, bx: number, by: number, pad = 6): boolean {
+/** Fuse badge bounds (matches FuseMarker translate(x-18, y-10) + 36×20). */
+export function fuseMarkerRect(fusePoint: Point): Rect {
+  return {
+    x: fusePoint.x - FUSE_MARKER_W / 2,
+    y: fusePoint.y - FUSE_MARKER_H / 2,
+    width: FUSE_MARKER_W,
+    height: FUSE_MARKER_H,
+  };
+}
+
+/** Ampacity hazard bounds (triangle roughly under the fuse point). */
+export function ampacityMarkerRect(fusePoint: Point): Rect {
+  return {
+    x: fusePoint.x - AMPACITY_MARKER_W / 2,
+    y: fusePoint.y + 14 - 9,
+    width: AMPACITY_MARKER_W,
+    height: AMPACITY_MARKER_H,
+  };
+}
+
+/** Approximate HTML `.device-caption` under a device body. */
+export function deviceCaptionRect(deviceBounds: Rect): Rect {
+  return {
+    x: deviceBounds.x,
+    y: deviceBounds.y + deviceBounds.height + 2,
+    width: deviceBounds.width,
+    height: CAPTION_HEIGHT,
+  };
+}
+
+/** Thin axis-aligned rects covering each wire segment. */
+export function wireSegmentObstacles(
+  path: Point[],
+  connectionId: string,
+  thickness = WIRE_OBSTACLE_THICKNESS,
+): LabelObstacle[] {
+  const half = thickness / 2;
+  const out: LabelObstacle[] = [];
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1]!;
+    const b = path[i]!;
+    const minX = Math.min(a.x, b.x) - half;
+    const maxX = Math.max(a.x, b.x) + half;
+    const minY = Math.min(a.y, b.y) - half;
+    const maxY = Math.max(a.y, b.y) + half;
+    out.push({
+      rect: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+      connectionId,
+      kind: 'wire',
+    });
+  }
+  return out;
+}
+
+export function rectsOverlap(
+  a: Rect,
+  ax: number,
+  ay: number,
+  b: Rect,
+  bx: number,
+  by: number,
+  pad = 6,
+): boolean {
   return (
     ax - pad < bx + b.width + pad &&
     ax + a.width + pad > bx - pad &&
@@ -577,69 +725,125 @@ function rectsOverlap(a: Rect, ax: number, ay: number, b: Rect, bx: number, by: 
   );
 }
 
-/** Nudge label anchors so visible labels do not overlap each other or devices. */
+function overlapArea(
+  a: Rect,
+  ax: number,
+  ay: number,
+  b: Rect,
+  bx: number,
+  by: number,
+  pad = 0,
+): number {
+  const left = Math.max(ax - pad, bx - pad);
+  const right = Math.min(ax + a.width + pad, bx + b.width + pad);
+  const top = Math.max(ay - pad, by - pad);
+  const bottom = Math.min(ay + a.height + pad, by + b.height + pad);
+  const w = right - left;
+  const h = bottom - top;
+  if (w <= 0 || h <= 0) return 0;
+  return w * h;
+}
+
+function normalizeObstacles(obstacles: Array<Rect | LabelObstacle>): LabelObstacle[] {
+  return obstacles.map((o) => ('rect' in o ? o : { rect: o, kind: 'device' as const }));
+}
+
+/** Deterministic candidate offsets: anchor, then expanding rings. */
+export function labelRingOffsets(
+  maxRadius = LABEL_MAX_RADIUS,
+  ringStep = LABEL_RING_STEP,
+  angleStepDeg = LABEL_ANGLE_STEP_DEG,
+): Point[] {
+  const offsets: Point[] = [{ x: 0, y: 0 }];
+  for (let r = ringStep; r <= maxRadius; r += ringStep) {
+    const denser = r >= ringStep * 3 ? angleStepDeg / 2 : angleStepDeg;
+    for (let deg = 0; deg < 360; deg += denser) {
+      const rad = (deg * Math.PI) / 180;
+      offsets.push({
+        x: Math.round(Math.cos(rad) * r),
+        y: Math.round(Math.sin(rad) * r),
+      });
+    }
+  }
+  return offsets;
+}
+
+const RING_OFFSETS = labelRingOffsets();
+
+/**
+ * Place labels so they avoid devices, markers, captions, other wires, and each other.
+ * Searches outward in rings; if nothing is free, picks the least-overlapping candidate
+ * and marks the label as crowded (never silently pretends it is free).
+ */
 export function resolveLabelPositions(
   labels: LabelPlacementRequest[],
-  deviceObstacles: Rect[] = [],
-): Map<string, Point> {
+  obstacles: Array<Rect | LabelObstacle> = [],
+): LabelPlacementResult {
   const positions = new Map<string, Point>();
+  const crowded = new Set<string>();
   const placed: Array<{ rect: Rect; x: number; y: number }> = [];
+  const baseObstacles = normalizeObstacles(obstacles);
 
-  const offsets = [
-    { x: 0, y: 0 },
-    { x: 0, y: -22 },
-    { x: 0, y: 22 },
-    { x: -36, y: 0 },
-    { x: 36, y: 0 },
-    { x: -36, y: -22 },
-    { x: 36, y: -22 },
-    { x: -36, y: 22 },
-    { x: 36, y: 22 },
-    { x: 0, y: -44 },
-    { x: 0, y: 44 },
-    { x: -72, y: 0 },
-    { x: 72, y: 0 },
-  ];
+  const sorted = [...labels].sort((a, b) => a.id.localeCompare(b.id));
 
-  for (const label of labels) {
+  for (const label of sorted) {
     const bounds = estimateLabelBounds(label.text, label.detail);
-    let chosen = label.anchor;
-    let placedThis = false;
+    const ownId = label.connectionId ?? label.id;
+    const activeObstacles = baseObstacles.filter(
+      (obs) => !(obs.kind === 'wire' && obs.connectionId === ownId),
+    );
 
-    for (const off of offsets) {
+    let bestFree: Point | null = null;
+    let bestCrowded: Point = label.anchor;
+    let bestOverlap = Infinity;
+
+    for (const off of RING_OFFSETS) {
       const cx = label.anchor.x + off.x;
       const cy = label.anchor.y + off.y;
       const left = cx - bounds.width / 2;
       const top = cy - bounds.height / 2;
 
-      const hitsDevice = deviceObstacles.some((obs) =>
-        rectsOverlap(bounds, left, top, obs, obs.x, obs.y, 4),
-      );
-      if (hitsDevice) continue;
+      let totalOverlap = 0;
+      let hits = false;
 
-      const hitsLabel = placed.some((p) =>
-        rectsOverlap(bounds, left, top, p.rect, p.x, p.y, 8),
-      );
-      if (hitsLabel) continue;
+      for (const obs of activeObstacles) {
+        const pad = obs.kind === 'wire' ? 2 : 4;
+        if (rectsOverlap(bounds, left, top, obs.rect, obs.rect.x, obs.rect.y, pad)) {
+          hits = true;
+          totalOverlap += overlapArea(bounds, left, top, obs.rect, obs.rect.x, obs.rect.y, pad);
+        }
+      }
 
-      chosen = { x: cx, y: cy };
-      placed.push({ rect: bounds, x: left, y: top });
-      placedThis = true;
-      break;
+      for (const p of placed) {
+        if (rectsOverlap(bounds, left, top, p.rect, p.x, p.y, 8)) {
+          hits = true;
+          totalOverlap += overlapArea(bounds, left, top, p.rect, p.x, p.y, 8);
+        }
+      }
+
+      if (!hits) {
+        bestFree = { x: cx, y: cy };
+        break;
+      }
+
+      if (totalOverlap < bestOverlap) {
+        bestOverlap = totalOverlap;
+        bestCrowded = { x: cx, y: cy };
+      }
     }
 
-    if (!placedThis) {
-      placed.push({
-        rect: bounds,
-        x: chosen.x - bounds.width / 2,
-        y: chosen.y - bounds.height / 2,
-      });
-    }
+    const chosen = bestFree ?? bestCrowded;
+    if (bestFree == null) crowded.add(label.id);
 
+    placed.push({
+      rect: bounds,
+      x: chosen.x - bounds.width / 2,
+      y: chosen.y - bounds.height / 2,
+    });
     positions.set(label.id, chosen);
   }
 
-  return positions;
+  return { positions, crowded };
 }
 
 /**

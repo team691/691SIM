@@ -10,6 +10,8 @@ declare module 'react' {
     currentTarget: T;
   };
 
+  export type RefObject<T> = { current: T | null };
+
   export function useState<T>(
     initialState: T | (() => T),
   ): [T, (value: T | ((prev: T) => T)) => void];
@@ -21,6 +23,10 @@ declare module 'react' {
     callback: T,
     deps: readonly unknown[],
   ): T;
+  export function useEffect(
+    effect: () => void | (() => void),
+    deps?: readonly unknown[],
+  ): void;
 
   export const StrictMode: (props: { children?: ReactNode }) => ReactElement | null;
 }

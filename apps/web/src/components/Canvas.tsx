@@ -6,14 +6,21 @@ import {
   type Port,
 } from '@691sim/core';
 import type { RobotModelState } from '../hooks/useRobotModel';
+import { usePanScroll } from '../hooks/usePanScroll';
 import { portTypeColor, PORT_TYPE_NAMES } from '../utils/labels';
 import { resolveConnectionPortType, resolveWireColors } from '../utils/wireStyles';
 import {
+  ampacityMarkerRect,
   buildSmoothWirePathD,
   computeWireRoutes,
+  deviceCaptionRect,
+  estimateLabelBounds,
+  fuseMarkerRect,
   getDisplayConnections,
   offsetManhattanPath,
   resolveLabelPositions,
+  wireSegmentObstacles,
+  type LabelObstacle,
   type Point,
   type Rect,
 } from '../utils/wireRouting';
@@ -126,27 +133,46 @@ function WireLabel({
   y,
   text,
   detail,
+  crowded = false,
+  anchor,
 }: {
   x: number;
   y: number;
   text: string;
   detail?: string;
+  crowded?: boolean;
+  anchor?: Point;
 }) {
   const lines = detail ? [text, detail] : [text];
-  const height = lines.length * 11 + 6;
-  const width = Math.max(...lines.map((l) => l.length * 5.5), 40) + 10;
+  const { width, height } = estimateLabelBounds(text, detail);
 
   return (
-    <g className="wire-label" transform={`translate(${x - width / 2}, ${y - height / 2})`} pointerEvents="none">
+    <g
+      className={`wire-label ${crowded ? 'wire-label-crowded' : ''}`}
+      transform={`translate(${x - width / 2}, ${y - height / 2})`}
+      pointerEvents="none"
+    >
+      {crowded && anchor && (
+        <line
+          className="wire-label-leader"
+          x1={anchor.x - (x - width / 2)}
+          y1={anchor.y - (y - height / 2)}
+          x2={width / 2}
+          y2={height / 2}
+          stroke="var(--text-muted)"
+          strokeWidth="1"
+          strokeDasharray="3 2"
+        />
+      )}
       <rect
         width={width}
         height={height}
         rx="4"
         className="wire-label-bg"
         fill="var(--bg-panel)"
-        stroke="var(--border-soft)"
+        stroke={crowded ? 'var(--accent)' : 'var(--border-soft)'}
         strokeWidth="1"
-        opacity="0.92"
+        opacity={crowded ? 1 : 0.97}
       />
       {lines.map((line, i) => (
         <text
@@ -214,11 +240,13 @@ function ConnectionLines({
 
   const canLabelCarriers = buildCanLabelCarriers(model.connections, deviceTypes, registry);
 
-  const deviceObstacles = model.devices
-    .map((d) => getDeviceBounds(d.id))
-    .filter((r): r is Rect => r != null);
-
-  const labelRequests: Array<{ id: string; anchor: Point; text: string; detail?: string }> = [];
+  const labelRequests: Array<{
+    id: string;
+    anchor: Point;
+    text: string;
+    detail?: string;
+    connectionId: string;
+  }> = [];
   const routeMeta = new Map<
     string,
     {
@@ -231,8 +259,18 @@ function ConnectionLines({
       annotation: string;
       visual: ReturnType<typeof resolveWireColors>;
       portType: PortType;
+      labelAnchor: Point;
     }
   >();
+
+  const labelObstacles: LabelObstacle[] = [];
+
+  for (const device of model.devices) {
+    const bounds = getDeviceBounds(device.id);
+    if (!bounds) continue;
+    labelObstacles.push({ rect: bounds, kind: 'device' });
+    labelObstacles.push({ rect: deviceCaptionRect(bounds), kind: 'caption' });
+  }
 
   for (const route of routes) {
     const conn = displayConnections.find((c) => c.id === route.connectionId);
@@ -268,6 +306,11 @@ function ConnectionLines({
       wireSim?.gauge,
     );
 
+    const labelAnchor = {
+      x: route.labelPoint.x,
+      y: route.labelPoint.y - (fuseInfo.show ? 18 : 0),
+    };
+
     routeMeta.set(conn.id, {
       conn,
       route,
@@ -278,58 +321,51 @@ function ConnectionLines({
       annotation,
       visual,
       portType,
+      labelAnchor,
     });
+
+    labelObstacles.push(...wireSegmentObstacles(route.path, conn.id));
+    if (fuseInfo.show) {
+      labelObstacles.push({ rect: fuseMarkerRect(route.fusePoint), kind: 'fuse' });
+    }
+    if (ampacityConnectionIds.has(conn.id)) {
+      labelObstacles.push({ rect: ampacityMarkerRect(route.fusePoint), kind: 'ampacity' });
+    }
 
     if (showWireLabels && labelInfo.show && labelInfo.text) {
       const detail =
         labelInfo.detail && labelInfo.detail !== labelInfo.text ? labelInfo.detail : annotation;
       labelRequests.push({
         id: conn.id,
-        anchor: {
-          x: route.labelPoint.x,
-          y: route.labelPoint.y - (fuseInfo.show ? 18 : 0),
-        },
+        connectionId: conn.id,
+        anchor: labelAnchor,
         text: labelInfo.text,
         detail: detail !== labelInfo.text ? detail : undefined,
       });
     }
   }
 
-  const labelPositions = resolveLabelPositions(labelRequests, deviceObstacles);
+  const { positions: labelPositions, crowded: crowdedLabels } = showWireLabels
+    ? resolveLabelPositions(labelRequests, labelObstacles)
+    : { positions: new Map<string, Point>(), crowded: new Set<string>() };
 
   return (
     <>
+      {/* Layer 1: wires (clickable). */}
       {routes.map((route) => {
         const meta = routeMeta.get(route.connectionId);
         if (!meta) return null;
-
-        const {
-          conn,
-          labelInfo,
-          fuseInfo,
-          fuseFault,
-          fuseRating,
-          annotation,
-          visual,
-        } = meta;
+        const { conn, visual, annotation, fuseFault } = meta;
         const isSelected = conn.id === selectedConnectionId;
         const isHighlighted =
           highlightDeviceIds.includes(conn.sourceDevice) ||
           highlightDeviceIds.includes(conn.targetDevice);
         const opacity = isSelected || isHighlighted ? 1 : 0.92;
         const pairOffset = visual.kind === 'pair' ? 5 : 0;
-        const labelPos = labelPositions.get(conn.id);
-        const displayText = labelInfo.text;
-        const displayDetail =
-          labelInfo.detail && labelInfo.detail !== labelInfo.text
-            ? labelInfo.detail
-            : annotation && annotation !== labelInfo.text
-              ? annotation
-              : undefined;
 
         return (
           <g
-            key={conn.id}
+            key={`wire-${conn.id}`}
             className={`connection-group ${isSelected ? 'selected' : ''} ${isHighlighted ? 'highlighted' : ''}`}
             opacity={opacity}
             onClick={(e: { stopPropagation(): void }) => {
@@ -346,25 +382,6 @@ function ConnectionLines({
             ) : (
               <WirePath path={route.path} color={visual.colors[0]!} width={visual.width} />
             )}
-            {fuseInfo.show && (
-              <FuseMarker
-                x={route.fusePoint.x}
-                y={route.fusePoint.y}
-                rating={fuseRating}
-                fault={fuseFault}
-              />
-            )}
-            {ampacityConnectionIds.has(conn.id) && (
-              <AmpacityHazardMarker x={route.fusePoint.x} y={route.fusePoint.y} />
-            )}
-            {showWireLabels && labelInfo.show && displayText && labelPos && (
-              <WireLabel
-                x={labelPos.x}
-                y={labelPos.y}
-                text={displayText}
-                detail={displayDetail}
-              />
-            )}
             <title>
               {visual.label}: {conn.sourceDevice}.{conn.sourcePort} → {conn.targetDevice}.
               {conn.targetPort}
@@ -374,6 +391,62 @@ function ConnectionLines({
           </g>
         );
       })}
+
+      {/* Layer 2: markers. */}
+      <g className="canvas-markers" pointerEvents="none">
+        {routes.map((route) => {
+          const meta = routeMeta.get(route.connectionId);
+          if (!meta) return null;
+          const { conn, fuseInfo, fuseRating, fuseFault } = meta;
+          return (
+            <g key={`marker-${conn.id}`}>
+              {fuseInfo.show && (
+                <FuseMarker
+                  x={route.fusePoint.x}
+                  y={route.fusePoint.y}
+                  rating={fuseRating}
+                  fault={fuseFault}
+                />
+              )}
+              {ampacityConnectionIds.has(conn.id) && (
+                <AmpacityHazardMarker x={route.fusePoint.x} y={route.fusePoint.y} />
+              )}
+            </g>
+          );
+        })}
+      </g>
+
+      {/* Layer 3: label backgrounds + text (above wires and markers). */}
+      {showWireLabels && (
+        <g className="canvas-labels" pointerEvents="none">
+          {routes.map((route) => {
+            const meta = routeMeta.get(route.connectionId);
+            if (!meta) return null;
+            const { conn, labelInfo, annotation, labelAnchor } = meta;
+            if (!labelInfo.show || !labelInfo.text) return null;
+            const labelPos = labelPositions.get(conn.id);
+            if (!labelPos) return null;
+            const displayDetail =
+              labelInfo.detail && labelInfo.detail !== labelInfo.text
+                ? labelInfo.detail
+                : annotation && annotation !== labelInfo.text
+                  ? annotation
+                  : undefined;
+            return (
+              <g key={`label-${conn.id}`}>
+                <WireLabel
+                  x={labelPos.x}
+                  y={labelPos.y}
+                  text={labelInfo.text}
+                  detail={displayDetail}
+                  crowded={crowdedLabels.has(conn.id)}
+                  anchor={labelAnchor}
+                />
+              </g>
+            );
+          })}
+        </g>
+      )}
     </>
   );
 }
@@ -399,6 +472,15 @@ export function Canvas({ state }: CanvasProps) {
   } = state;
 
   const canvasRef = useRef<HTMLElement>(null);
+  const {
+    onPointerDown: onPanPointerDown,
+    onPointerMove: onPanPointerMove,
+    onPointerUp: onPanPointerUp,
+    consumeSuppressClick,
+    hasActiveSession,
+    spaceHeld,
+    cursorClass: panCursorClass,
+  } = usePanScroll({ canvasRef });
   const [dragLine, setDragLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
     null,
   );
@@ -482,6 +564,8 @@ export function Canvas({ state }: CanvasProps) {
 
   const onDevicePointerDown = useCallback(
     (deviceId: string, e: PointerEvent) => {
+      // Space or middle-mouse pan takes priority over device drag.
+      if (spaceHeld || e.button === 1) return;
       const device = model.devices.find((d: DeviceInstance) => d.id === deviceId);
       if (!device) return;
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -495,7 +579,7 @@ export function Canvas({ state }: CanvasProps) {
       setSelectedDeviceId(deviceId);
       setSelectedConnectionId(null);
     },
-    [model.devices, setSelectedConnectionId, setSelectedDeviceId],
+    [model.devices, setSelectedConnectionId, setSelectedDeviceId, spaceHeld],
   );
 
   const onPortPointerDown = useCallback(
@@ -523,6 +607,8 @@ export function Canvas({ state }: CanvasProps) {
 
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
+      if (onPanPointerMove(e)) return;
+
       if (dragRef.current) {
         const dx = e.clientX - dragRef.current.startX;
         const dy = e.clientY - dragRef.current.startY;
@@ -547,11 +633,13 @@ export function Canvas({ state }: CanvasProps) {
         setDragLine((line) => (line ? { ...line, x2: pt.x, y2: pt.y } : null));
       }
     },
-    [canvasPoint, dragLine, moveDevice, startWireFrom],
+    [canvasPoint, dragLine, moveDevice, onPanPointerMove, startWireFrom],
   );
 
   const onPointerUp = useCallback(
     (e: PointerEvent) => {
+      if (onPanPointerUp(e)) return;
+
       dragRef.current = null;
 
       if (wireFromRef.current) {
@@ -569,8 +657,27 @@ export function Canvas({ state }: CanvasProps) {
         setDragLine(null);
       }
     },
-    [finishWireDrag, pendingPort],
+    [finishWireDrag, onPanPointerUp, pendingPort],
   );
+
+  const onCanvasPointerLeave = useCallback(
+    (e: PointerEvent) => {
+      // With pointer capture, pan continues outside the canvas; do not abort it.
+      if (hasActiveSession()) return;
+      onPointerUp(e);
+    },
+    [hasActiveSession, onPointerUp],
+  );
+
+  const onCanvasClick = useCallback(() => {
+    if (consumeSuppressClick()) return;
+    setSelectedDeviceId(null);
+    setSelectedConnectionId(null);
+    cancelWire();
+    setDragLine(null);
+    wireFromRef.current = null;
+    wireDragActiveRef.current = false;
+  }, [cancelWire, consumeSuppressClick, setSelectedConnectionId, setSelectedDeviceId]);
 
   const pendingPortType = pendingPort
     ? registry.get(deviceTypes.get(pendingPort.deviceId) ?? '')?.ports.find(
@@ -588,17 +695,15 @@ export function Canvas({ state }: CanvasProps) {
     <main
       ref={canvasRef}
       id="circuit-canvas"
-      className={`canvas ${isWiring ? 'canvas-wiring' : ''}`}
+      className={`canvas ${isWiring ? 'canvas-wiring' : ''} ${panCursorClass} ${spaceHeld ? 'canvas-space-pan' : ''}`}
+      onPointerDown={onPanPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={onPointerUp}
-      onClick={() => {
-        setSelectedDeviceId(null);
-        setSelectedConnectionId(null);
-        cancelWire();
-        setDragLine(null);
-        wireFromRef.current = null;
-        wireDragActiveRef.current = false;
+      onPointerLeave={onCanvasPointerLeave}
+      onClick={onCanvasClick}
+      onAuxClick={(e: { preventDefault(): void; button: number }) => {
+        // Suppress middle-click default behaviors after a pan.
+        if (e.button === 1) e.preventDefault();
       }}
     >
       {model.devices.map((device: DeviceInstance) => {
