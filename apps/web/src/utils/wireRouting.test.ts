@@ -4,12 +4,15 @@ import {
   buildSmoothWirePathD,
   computeWireRoutes,
   controlPointForRoute,
+  estimateLabelBounds,
+  fuseMarkerRect,
   fusePointForRoute,
   manhattanRoute,
   nearestPointOnPath,
   offsetManhattanPath,
   pointOnPathAtT,
   preferredDeviceSides,
+  rectsOverlap,
   resolveLabelPositions,
   simplifyPath,
   snapOrthogonalPath,
@@ -222,13 +225,59 @@ describe('pointOnPathAtT', () => {
 
 describe('resolveLabelPositions', () => {
   it('separates overlapping label anchors', () => {
-    const positions = resolveLabelPositions([
+    const { positions } = resolveLabelPositions([
       { id: 'a', anchor: { x: 100, y: 100 }, text: 'PDH → SparkMax' },
       { id: 'b', anchor: { x: 102, y: 101 }, text: 'PDH → VRM' },
     ]);
     const a = positions.get('a')!;
     const b = positions.get('b')!;
     expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(8);
+  });
+
+  it('avoids a fuse marker obstacle', () => {
+    const fusePoint = { x: 100, y: 100 };
+    const fuse = fuseMarkerRect(fusePoint);
+    const text = 'PDH → Motor';
+    const { positions, crowded } = resolveLabelPositions(
+      [{ id: 'a', anchor: fusePoint, text }],
+      [{ rect: fuse, kind: 'fuse' }],
+    );
+    const pos = positions.get('a')!;
+    const bounds = estimateLabelBounds(text);
+    const left = pos.x - bounds.width / 2;
+    const top = pos.y - bounds.height / 2;
+    expect(rectsOverlap(bounds, left, top, fuse, fuse.x, fuse.y, 4)).toBe(false);
+    expect(crowded.has('a')).toBe(false);
+  });
+
+  it('returns a least-overlap crowded result without throwing', () => {
+    const wall: Rect = { x: 0, y: 0, width: 400, height: 400 };
+    const { positions, crowded } = resolveLabelPositions(
+      [
+        { id: 'a', anchor: { x: 200, y: 200 }, text: 'Crowded A' },
+        { id: 'b', anchor: { x: 200, y: 200 }, text: 'Crowded B' },
+        { id: 'c', anchor: { x: 200, y: 200 }, text: 'Crowded C' },
+      ],
+      [{ rect: wall, kind: 'device' }],
+    );
+    expect(positions.size).toBe(3);
+    expect(crowded.size).toBeGreaterThan(0);
+    for (const id of ['a', 'b', 'c']) {
+      expect(positions.get(id)).toBeDefined();
+    }
+  });
+
+  it('is deterministic for the same input', () => {
+    const labels = [
+      { id: 'z', anchor: { x: 50, y: 50 }, text: 'Z label' },
+      { id: 'a', anchor: { x: 52, y: 51 }, text: 'A label' },
+      { id: 'm', anchor: { x: 48, y: 53 }, text: 'M label' },
+    ];
+    const obstacles = [{ rect: { x: 40, y: 40, width: 30, height: 20 }, kind: 'fuse' as const }];
+    const first = resolveLabelPositions(labels, obstacles);
+    const second = resolveLabelPositions(labels, obstacles);
+    expect([...first.positions.entries()]).toEqual([...second.positions.entries()]);
+    expect([...first.crowded].sort()).toEqual([...second.crowded].sort());
   });
 });
 
