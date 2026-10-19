@@ -23,7 +23,9 @@ export * from './network.js';
 export * from './solve.js';
 export * from './limits.js';
 export * from './kraken.js';
+export * from './batterySoc.js';
 export * from './match.js';
+export * from './matchLogCompare.js';
 export * from './swerve.js';
 export * from './canTopology.js';
 
@@ -149,18 +151,17 @@ function buildDiagnostics(
   return diagnostics;
 }
 
-/**
- * Run the full circuit simulation for a robot model: builds the OOP component
- * graph, computes dynamic voltage drop / brownout risk, validates wire
- * ampacity, and checks CAN bus topology. Decoupled from any UI framework.
- */
-export function simulateCircuit(
-  model: RobotModel,
-  options: SimulateOptions = {},
-): SimulationResult {
-  const registry = options.registry ?? createDefaultDeviceRegistry();
-  const mode = options.mode ?? 'peak';
+export interface CircuitGraph {
+  components: Map<string, CircuitComponent>;
+  powerEdges: PowerEdge[];
+  canEdges: CanEdge[];
+}
 
+/** Build component + edge maps used by voltage and match solvers. */
+export function buildCircuitGraph(
+  model: RobotModel,
+  registry: DeviceRegistry = createDefaultDeviceRegistry(),
+): CircuitGraph {
   const components = new Map<string, CircuitComponent>();
   const typeById = new Map<string, string>();
   for (const instance of model.devices) {
@@ -191,6 +192,22 @@ export function simulateCircuit(
       });
     }
   }
+
+  return { components, powerEdges, canEdges };
+}
+
+/**
+ * Run the full circuit simulation for a robot model: builds the OOP component
+ * graph, computes dynamic voltage drop / brownout risk, validates wire
+ * ampacity, and checks CAN bus topology. Decoupled from any UI framework.
+ */
+export function simulateCircuit(
+  model: RobotModel,
+  options: SimulateOptions = {},
+): SimulationResult {
+  const registry = options.registry ?? createDefaultDeviceRegistry();
+  const mode = options.mode ?? 'peak';
+  const { components, powerEdges, canEdges } = buildCircuitGraph(model, registry);
 
   const voltage = simulateVoltage(components, powerEdges, mode);
   const can = verifyCanTopology(components, canEdges);

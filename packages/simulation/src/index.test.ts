@@ -6,8 +6,10 @@ import {
   Battery,
   MotorController,
   SimWire,
+  buildMotorVoltageLoadModels,
   buildPowerNetwork,
   createComponent,
+  motorSupplyCurrentModel,
   simulateCircuit,
   simulateVoltage,
   verifyCanTopology,
@@ -15,6 +17,15 @@ import {
   type PowerEdge,
   type VoltageSimResult,
 } from './index.js';
+
+function volts(result: VoltageSimResult, deviceId: string): number {
+  const row = result.deviceVoltages.find((device) => device.deviceId === deviceId);
+  const voltage = row?.voltage;
+  if (voltage === undefined || voltage === null) {
+    throw new Error(`expected a solved voltage for ${deviceId}`);
+  }
+  return voltage;
+}
 
 describe('CircuitComponent model', () => {
   it('builds the correct subclass and tracks current/voltage/CAN attributes', () => {
@@ -107,15 +118,6 @@ describe('buildPowerNetwork', () => {
 });
 
 describe('nodal voltage solve', () => {
-  function volts(result: VoltageSimResult, deviceId: string): number {
-    const row = result.deviceVoltages.find((device) => device.deviceId === deviceId);
-    const voltage = row?.voltage;
-    if (voltage === undefined || voltage === null) {
-      throw new Error(`expected a solved voltage for ${deviceId}`);
-    }
-    return voltage;
-  }
-
   it('drops V_batt - I(R_int + 2 R_wire) across one wire and one load', () => {
     const amps = 10;
     const battery = createComponent({ id: 'battery-1', type: 'Battery' });
@@ -309,6 +311,140 @@ describe('nodal voltage solve', () => {
     expect(volts(result, 'spark-1')).toBeCloseTo(expected, 6);
     expect(result.wireCurrents[0]?.currentAmps).toBeCloseTo(amps / 2, 6);
     expect(result.wireCurrents[1]?.currentAmps).toBeCloseTo(amps / 2, 6);
+  });
+});
+
+describe('wire temperature and extra series resistance', () => {
+  it('scales copper resistance with temperature from the 20 °C table value', () => {
+    // R(T) = R20 * (1 + 0.00393*(T-20)). At 70 °C: factor = 1 + 0.00393*50 = 1.1965
+    const cold = new SimWire('w', 12, 24, 20);
+    const hot = new SimWire('w', 12, 24, 70);
+    expect(cold.resistanceOhms).toBeCloseTo(cold.resistanceOhmsAt20C, 12);
+    expect(hot.resistanceOhms).toBeCloseTo(cold.resistanceOhmsAt20C * (1 + 0.00393 * 50), 12);
+  });
+
+  it('adds optional PowerEdge seriesResistanceOhms into the stamped branch', () => {
+    const amps = 10;
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: amps, peakCurrentAmps: amps },
+    });
+    const wire = new SimWire('battery-spark', 12, 12);
+    const extra = 0.05;
+    // V = 12.6 - I*(R_int + 2R_wire + R_extra)
+    const expected = 12.6 - amps * (0.011 + 2 * wire.resistanceOhms + extra);
+    const result = simulateVoltage(
+      new Map([
+        [battery.id, battery],
+        [spark.id, spark],
+      ]),
+      [
+        {
+          connectionId: wire.connectionId,
+          from: battery.id,
+          to: spark.id,
+          wire,
+          seriesResistanceOhms: extra,
+        },
+      ],
+      'peak',
+    );
+    expect(volts(result, 'spark-1')).toBeCloseTo(expected, 6);
+    expect(result.wireCurrents[0]?.resistanceOhms).toBeCloseTo(2 * wire.resistanceOhms + extra, 9);
+    expect(result.dropToLowestDeviceVolts).toBeCloseTo(result.wireVoltageDropTotal, 12);
+  });
+});
+
+describe('voltage-dependent motor loads', () => {
+  it('matches the constant-current result when no load model is supplied', () => {
+    const amps = 40;
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: amps, peakCurrentAmps: amps },
+    });
+    const wire = new SimWire('battery-spark', 12, 24);
+    const components = new Map([
+      [battery.id, battery],
+      [spark.id, spark],
+    ]);
+    const edges: PowerEdge[] = [
+      { connectionId: wire.connectionId, from: battery.id, to: spark.id, wire },
+    ];
+    const without = simulateVoltage(components, edges, 'peak');
+    const withEmpty = simulateVoltage(components, edges, 'peak', undefined, new Map());
+    expect(withEmpty.systemVoltage).toBe(without.systemVoltage);
+    expect(withEmpty.totalCurrentAmps).toBe(without.totalCurrentAmps);
+    expect(withEmpty.deviceVoltages).toEqual(without.deviceVoltages);
+    expect(withEmpty.loadIterations).toBeUndefined();
+  });
+
+  it('converges to the closed-form I∝V solution for a single motor', () => {
+    // Series: V_s -- R_int -- R_wire_rt -- motor node V.
+    // Model: I = I0 * (V / V_nom). Substitute I into KVL:
+    //   V_s = I*(R_int + R_rt) + V
+    //   V_s = I0*V/V_nom*(R_int+R_rt) + V
+    //   V = V_s / (1 + I0*(R_int+R_rt)/V_nom)
+    // (Linear in V for proportional current; constant-power loads would be quadratic.)
+    const vS = 12.6;
+    const rInt = 0.011;
+    const i0 = 40;
+    const vNom = 12.6;
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: i0, peakCurrentAmps: i0 },
+    });
+    const wire = new SimWire('battery-spark', 12, 24);
+    const rRt = 2 * wire.resistanceOhms;
+    const expectedV = vS / (1 + (i0 * (rInt + rRt)) / vNom);
+    const expectedI = i0 * (expectedV / vNom);
+
+    const components = new Map([
+      [battery.id, battery],
+      [spark.id, spark],
+    ]);
+    const edges: PowerEdge[] = [
+      { connectionId: wire.connectionId, from: battery.id, to: spark.id, wire },
+    ];
+    const models = new Map([
+      [spark.id, motorSupplyCurrentModel(i0, vNom)],
+    ]);
+    const result = simulateVoltage(components, edges, 'peak', undefined, models);
+
+    expect(result.issues.some((issue) => issue.code === 'LOAD_ITERATION_DIVERGED')).toBe(false);
+    expect(volts(result, 'spark-1')).toBeCloseTo(expectedV, 6);
+    // Current is from the last fixed-point iterate; within 1e-5 A of I0*V/V_nom.
+    expect(result.totalCurrentAmps).toBeCloseTo(expectedI, 5);
+    // Sag is less severe than the constant-current prediction I0*(R_int+R_rt).
+    const constantCurrentV = vS - i0 * (rInt + rRt);
+    expect(expectedV).toBeGreaterThan(constantCurrentV);
+  });
+
+  it('buildMotorVoltageLoadModels only attaches models to motor controllers', () => {
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const rio = createComponent({ id: 'rio-1', type: 'RoboRIO' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: 10, peakCurrentAmps: 10 },
+    });
+    const models = buildMotorVoltageLoadModels(
+      new Map([
+        [battery.id, battery],
+        [rio.id, rio],
+        [spark.id, spark],
+      ]),
+      'peak',
+      12.6,
+    );
+    expect(models.has('spark-1')).toBe(true);
+    expect(models.has('rio-1')).toBe(false);
+    expect(models.has('battery-1')).toBe(false);
   });
 });
 

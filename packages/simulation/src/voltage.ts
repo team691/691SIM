@@ -20,6 +20,11 @@ export interface PowerEdge {
   from: string;
   to: string;
   wire: SimWire;
+  /**
+   * Extra series resistance on this connection (ohms), stamped once in addition
+   * to the wire's round-trip 2·R. Defaults to 0 (connectors, sense resistors, etc.).
+   */
+  seriesResistanceOhms?: number;
 }
 
 export interface WireCurrentResult {
@@ -45,6 +50,27 @@ export interface DeviceVoltage {
   voltage: number | null;
 }
 
+/**
+ * Maps a device's solved node voltage to its bus supply current (amps).
+ * When omitted, the device keeps a constant current sink.
+ */
+export type LoadCurrentModel = (nodeVoltageVolts: number) => number;
+
+export interface SimulateVoltageOptions {
+  /** Replace steady draws for listed devices (amps). */
+  loadOverride?: ReadonlyMap<string, number>;
+  /**
+   * Optional per-device I(V) models. When empty/undefined, the solve is a
+   * single constant-current pass (bit-for-bit with the previous behavior).
+   */
+  loadModels?: ReadonlyMap<string, LoadCurrentModel>;
+}
+
+export const LOAD_ITERATION_TOLERANCE_VOLTS = 1e-6;
+export const LOAD_ITERATION_MAX = 50;
+/** Mixing factor when successive voltage updates grow (oscillation). */
+export const LOAD_ITERATION_DAMPING = 0.5;
+
 export interface VoltageSimResult {
   hasBattery: boolean;
   mode: LoadMode;
@@ -55,8 +81,14 @@ export interface VoltageSimResult {
   /**
    * Drop from the battery terminal to the lowest solved device. This is the
    * shared path plus that device's own branch, not the sum of every wire.
+   * Prefer `dropToLowestDeviceVolts` (same value; clearer name).
    */
   wireVoltageDropTotal: number;
+  /**
+   * Battery open-circuit voltage minus internal drop minus the lowest device
+   * voltage. Depends on which device is lowest; it is not Σ wire drops.
+   */
+  dropToLowestDeviceVolts?: number;
   /** Lowest solved device voltage. The per-device values live on `deviceVoltages`. */
   systemVoltage: number;
   brownoutThreshold: number;
@@ -68,6 +100,46 @@ export interface VoltageSimResult {
   undervoltage: UndervoltageDevice[];
   /** The undervoltage device with the largest deficit, or null if none. */
   firstFailure: UndervoltageDevice | null;
+  /** Present when voltage-dependent load iteration ran. */
+  loadIterations?: number;
+}
+
+/**
+ * Assumption for motor controllers: at fixed mechanical load / duty, bus
+ * supply current scales approximately with available bus voltage,
+ * I(V) = I_nominal · (V_node / V_nominal). Controllers and sensors without a
+ * model stay constant-current. This is not a datasheet motor curve.
+ */
+export function motorSupplyCurrentModel(
+  ampsAtNominal: number,
+  nominalVoltageVolts: number,
+): LoadCurrentModel {
+  const vNom = nominalVoltageVolts > 0 ? nominalVoltageVolts : 12.6;
+  return (nodeVoltageVolts: number) => {
+    const v = Math.max(0, nodeVoltageVolts);
+    return ampsAtNominal * (v / vNom);
+  };
+}
+
+/** Build I(V) models for every MotorController using its resolved bus draw at V_nominal. */
+export function buildMotorVoltageLoadModels(
+  components: Map<string, CircuitComponent>,
+  mode: LoadMode,
+  nominalVoltageVolts: number,
+  loadOverride?: ReadonlyMap<string, number>,
+): Map<string, LoadCurrentModel> {
+  const models = new Map<string, LoadCurrentModel>();
+  for (const component of components.values()) {
+    if (!(component instanceof MotorController)) continue;
+    const override = loadOverride?.get(component.id);
+    const resolved =
+      override !== undefined
+        ? { ok: true as const, amps: override }
+        : busLoadAmps(component, mode);
+    if (!resolved.ok) continue;
+    models.set(component.id, motorSupplyCurrentModel(resolved.amps, nominalVoltageVolts));
+  }
+  return models;
 }
 
 /**
@@ -83,6 +155,7 @@ export function simulateVoltage(
   powerEdges: PowerEdge[],
   mode: LoadMode = 'peak',
   loadOverride?: ReadonlyMap<string, number>,
+  loadModels?: ReadonlyMap<string, LoadCurrentModel>,
 ): VoltageSimResult {
   const battery = [...components.values()].find(
     (component): component is Battery => component instanceof Battery,
@@ -95,7 +168,69 @@ export function simulateVoltage(
   }
 
   const network = buildPowerNetwork(components, powerEdges);
-  const solution = solvePowerNetwork(network, loads.amps);
+  const hasModels = loadModels !== undefined && loadModels.size > 0;
+
+  let amps = new Map(loads.amps);
+  let solution = solvePowerNetwork(network, amps);
+  let loadIterations = 0;
+  const issues: VoltageIssue[] = [...solution.issues];
+
+  if (hasModels && solution.solved) {
+    let prevMaxDelta = Number.POSITIVE_INFINITY;
+    let damping = 1;
+    let converged = false;
+
+    for (let iter = 0; iter < LOAD_ITERATION_MAX; iter += 1) {
+      loadIterations = iter + 1;
+      const prevVoltageByNode = solution.voltageByNode;
+      const nextAmps = new Map(amps);
+
+      for (const [deviceId, model] of loadModels) {
+        const v = prevVoltageByNode.get(deviceId);
+        if (v === undefined) continue;
+        const target = model(v);
+        const previous = amps.get(deviceId) ?? target;
+        nextAmps.set(deviceId, (1 - damping) * previous + damping * target);
+      }
+
+      const nextSolution = solvePowerNetwork(network, nextAmps);
+      if (!nextSolution.solved) {
+        solution = nextSolution;
+        amps = nextAmps;
+        issues.push(...nextSolution.issues.filter((issue) => !issues.some((existing) => existing.code === issue.code)));
+        break;
+      }
+
+      let maxDelta = 0;
+      for (const [nodeId, voltage] of nextSolution.voltageByNode) {
+        const previous = prevVoltageByNode.get(nodeId);
+        if (previous === undefined) continue;
+        maxDelta = Math.max(maxDelta, Math.abs(voltage - previous));
+      }
+
+      solution = nextSolution;
+      amps = nextAmps;
+
+      if (maxDelta < LOAD_ITERATION_TOLERANCE_VOLTS) {
+        converged = true;
+        break;
+      }
+
+      // If the update grew, the fixed point is oscillating — damp the next step.
+      if (maxDelta > prevMaxDelta) {
+        damping = LOAD_ITERATION_DAMPING;
+      }
+      prevMaxDelta = maxDelta;
+    }
+
+    if (!converged && solution.solved) {
+      issues.push({
+        code: 'LOAD_ITERATION_DIVERGED',
+        message: `Voltage-dependent load iteration did not converge within ${LOAD_ITERATION_MAX} steps (tolerance ${LOAD_ITERATION_TOLERANCE_VOLTS} V). Returning the last iterate.`,
+        deviceIds: [...loadModels.keys()],
+      });
+    }
+  }
 
   const deviceVoltages: DeviceVoltage[] = [...components.values()].map((component) => ({
     deviceId: component.id,
@@ -107,18 +242,18 @@ export function simulateVoltage(
   );
   const systemVoltage = solvedVoltages.length > 0 ? Math.min(...solvedVoltages) : batteryVoltage;
 
-  // Constant-current loads make battery current equal the sum of every load
-  // that actually has a path to the source. That sum is exact; inferring it
-  // from (v_s - v_terminal) / R_int would pick up elimination roundoff.
+  // Connected load current sum. With voltage-dependent models this is the
+  // last iterate's sink currents on powered nodes.
   let totalCurrentAmps = 0;
   if (solution.solved) {
     for (const component of components.values()) {
       if (!solution.voltageByNode.has(component.id)) continue;
-      totalCurrentAmps += loads.amps.get(component.id) ?? 0;
+      totalCurrentAmps += amps.get(component.id) ?? 0;
     }
   }
   const internalVoltageDrop = totalCurrentAmps * internalResistanceOhms;
-  const wireVoltageDropTotal = batteryVoltage - internalVoltageDrop - systemVoltage;
+  const dropToLowestDeviceVolts = batteryVoltage - internalVoltageDrop - systemVoltage;
+  const wireVoltageDropTotal = dropToLowestDeviceVolts;
 
   const wireCurrents: WireCurrentResult[] = powerEdges.map((edge) => {
     const resistor = network.resistors.find((candidate) => candidate.connectionId === edge.connectionId);
@@ -143,6 +278,18 @@ export function simulateVoltage(
     };
   });
 
+  // Merge solver structural issues with iteration issues (dedupe by code+message).
+  const mergedIssues = [...solution.issues];
+  for (const issue of issues) {
+    if (
+      !mergedIssues.some(
+        (existing) => existing.code === issue.code && existing.message === issue.message,
+      )
+    ) {
+      mergedIssues.push(issue);
+    }
+  }
+
   return {
     hasBattery: battery !== undefined,
     mode,
@@ -151,12 +298,14 @@ export function simulateVoltage(
     totalCurrentAmps,
     internalVoltageDrop,
     wireVoltageDropTotal,
+    dropToLowestDeviceVolts,
     systemVoltage,
     brownoutThreshold: BROWNOUT_VOLTAGE_THRESHOLD,
     brownoutRisk: battery !== undefined && solution.solved && systemVoltage < BROWNOUT_VOLTAGE_THRESHOLD,
     wireCurrents,
     deviceVoltages,
-    issues: solution.issues,
+    issues: mergedIssues,
+    loadIterations: hasModels ? loadIterations : undefined,
     ...evaluateUndervoltage(
       deviceVoltages.map((row) => ({
         deviceId: row.deviceId,
@@ -240,6 +389,7 @@ function unsolvedResult(
     totalCurrentAmps: 0,
     internalVoltageDrop: 0,
     wireVoltageDropTotal: 0,
+    dropToLowestDeviceVolts: 0,
     systemVoltage: batteryVoltage,
     brownoutThreshold: BROWNOUT_VOLTAGE_THRESHOLD,
     brownoutRisk: false,

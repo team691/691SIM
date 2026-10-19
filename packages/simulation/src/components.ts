@@ -1,4 +1,5 @@
 import { DeviceCategory, type DeviceDefinition, type DeviceInstance } from '@691sim/core';
+import type { BatteryStateOfChargeModel } from './batterySoc.js';
 import type { KrakenVariant } from './kraken.js';
 import { readTalonVariant } from './kraken.js';
 import { minVoltageForType } from './limits.js';
@@ -100,15 +101,22 @@ export class Battery extends CircuitComponent {
   readonly category = 'battery';
   readonly nominalVoltage: number;
   readonly internalResistanceOhms: number;
+  /**
+   * Optional coulomb-counting model for match sims. When null/undefined,
+   * simulateMatch leaves Voc and R_int fixed (previous behavior).
+   */
+  stateOfChargeModel: BatteryStateOfChargeModel | null;
 
   constructor(
     init: ComponentInit,
     nominalVoltage: number = BATTERY_NOMINAL_VOLTAGE,
     internalResistanceOhms: number = BATTERY_INTERNAL_RESISTANCE_OHM,
+    stateOfChargeModel: BatteryStateOfChargeModel | null = null,
   ) {
     super(init);
     this.nominalVoltage = nominalVoltage;
     this.internalResistanceOhms = internalResistanceOhms;
+    this.stateOfChargeModel = stateOfChargeModel;
   }
 
   override isPowerSource(): boolean {
@@ -117,6 +125,24 @@ export class Battery extends CircuitComponent {
 
   override currentDraw(): number {
     return 0;
+  }
+
+  /** Copy with different Voc / R_int, preserving the SoC model reference. */
+  withElectricals(openCircuitVoltage: number, internalResistanceOhms: number): Battery {
+    return new Battery(
+      {
+        id: this.id,
+        type: this.type,
+        canId: this.canId,
+        maxVoltage: this.maxVoltage,
+        continuousCurrentAmps: this.continuousCurrentAmps,
+        peakCurrentAmps: this.peakCurrentAmps,
+        minVoltage: this.minVoltage,
+      },
+      openCircuitVoltage,
+      internalResistanceOhms,
+      this.stateOfChargeModel,
+    );
   }
 }
 

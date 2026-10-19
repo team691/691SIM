@@ -28,6 +28,13 @@ export const AWG_TABLE: Record<AwgGauge, AwgSpec> = {
 
 export const DEFAULT_WIRE_GAUGE: AwgGauge = 12;
 export const DEFAULT_WIRE_LENGTH_INCHES = 24;
+/** Reference temperature for AWG table ohms-per-foot values. */
+export const WIRE_REFERENCE_TEMPERATURE_C = 20;
+/**
+ * Copper resistance temperature coefficient (per °C) near 20 °C.
+ * R(T) = R_20 · (1 + α · (T − 20)).
+ */
+export const COPPER_RESISTANCE_TEMP_COEFF_PER_C = 0.00393;
 
 function coerceGauge(value: unknown, fallback: AwgGauge): AwgGauge {
   const n = typeof value === 'number' ? value : Number(value);
@@ -47,11 +54,19 @@ export class SimWire {
   readonly connectionId: string;
   readonly gauge: AwgGauge;
   readonly lengthInches: number;
+  /** Conductor temperature in °C. Defaults to the AWG table reference (20 °C). */
+  readonly temperatureCelsius: number;
 
-  constructor(connectionId: string, gauge: AwgGauge, lengthInches: number) {
+  constructor(
+    connectionId: string,
+    gauge: AwgGauge,
+    lengthInches: number,
+    temperatureCelsius: number = WIRE_REFERENCE_TEMPERATURE_C,
+  ) {
     this.connectionId = connectionId;
     this.gauge = gauge;
     this.lengthInches = lengthInches;
+    this.temperatureCelsius = temperatureCelsius;
   }
 
   get spec(): AwgSpec {
@@ -62,9 +77,18 @@ export class SimWire {
     return this.lengthInches / 12;
   }
 
-  /** Conductor resistance for this wire, in ohms. */
-  get resistanceOhms(): number {
+  /** Resistance at the AWG table reference temperature (20 °C), before the copper temp factor. */
+  get resistanceOhmsAt20C(): number {
     return this.spec.ohmsPerFoot * this.lengthFeet;
+  }
+
+  /**
+   * Conductor resistance for this wire, in ohms, at `temperatureCelsius`.
+   * R(T) = R_20 · (1 + 0.00393 · (T − 20)).
+   */
+  get resistanceOhms(): number {
+    const deltaT = this.temperatureCelsius - WIRE_REFERENCE_TEMPERATURE_C;
+    return this.resistanceOhmsAt20C * (1 + COPPER_RESISTANCE_TEMP_COEFF_PER_C * deltaT);
   }
 
   get maxAmps(): number {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  Battery,
   BROWNOUT_VOLTAGE_THRESHOLD,
   MotorController,
   ROBORIO_MIN_VOLTAGE_VOLTS,
@@ -11,13 +12,16 @@ import {
   createComponent,
   createSwerveModule,
   createSwerveRobotModel,
+  interpolateBatteryElectricals,
   krakenSupplyCurrentAmps,
+  placeholderBatterySocModel,
   requireKrakenNumber,
   simulateCircuit,
   simulateMatch,
   simulateVoltage,
   swerveDriveIds,
   swerveSteerIds,
+  type BatteryStateOfChargeModel,
   type PowerEdge,
 } from './index.js';
 
@@ -129,6 +133,85 @@ describe('simulateMatch', () => {
     expect(result.firstBrownout?.t).toBe(135);
     expect(result.firstBrownout?.deviceId).toBe('rio-1');
     expect(result.firstBrownout?.minVoltage).toBe(6.3);
+  });
+
+  it('ignores SoC when the curve is still a null placeholder and reports an issue', () => {
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    expect(battery).toBeInstanceOf(Battery);
+    (battery as Battery).stateOfChargeModel = placeholderBatterySocModel(1);
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: 10, peakCurrentAmps: 10 },
+    });
+    const wire = new SimWire('battery-spark', 12, 12);
+    const result = simulateMatch(
+      [
+        { t: 0, loadsByDeviceId: { 'spark-1': 10 } },
+        { t: 10, loadsByDeviceId: { 'spark-1': 10 } },
+      ],
+      new Map([
+        [battery.id, battery],
+        [spark.id, spark],
+      ]),
+      [{ connectionId: wire.connectionId, from: battery.id, to: spark.id, wire }],
+    );
+    expect(result.issues.some((issue) => issue.code === 'BATTERY_SOC_CURVE_MISSING')).toBe(true);
+    expect(result.samples[0]?.stateOfCharge).toBeUndefined();
+    // Unchanged series formula: V = 12.6 - 10*(0.011 + 2R)
+    const expected = 12.6 - 10 * (0.011 + 2 * wire.resistanceOhms);
+    expect(result.samples[0]?.systemVoltage).toBeCloseTo(expected, 6);
+  });
+
+  it('tracks SoC with a test-only two-point linear curve', () => {
+    // TEST-ONLY curve (not a datasheet): SoC 1 → Voc=12.6 / R=0.011, SoC 0 → Voc=11.0 / R=0.020.
+    const testCurve: BatteryStateOfChargeModel = {
+      capacityAh: 5,
+      initialStateOfCharge: 1,
+      curve: {
+        points: [
+          { stateOfCharge: 0, openCircuitVoltage: 11.0, internalResistanceOhms: 0.02 },
+          { stateOfCharge: 1, openCircuitVoltage: 12.6, internalResistanceOhms: 0.011 },
+        ],
+      },
+    };
+    const mid = interpolateBatteryElectricals(testCurve.curve, 0.5);
+    // Midpoint: Voc = (12.6+11)/2 = 11.8, R = (0.011+0.02)/2 = 0.0155
+    expect(mid?.openCircuitVoltage).toBeCloseTo(11.8, 9);
+    expect(mid?.internalResistanceOhms).toBeCloseTo(0.0155, 9);
+
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' }) as Battery;
+    battery.stateOfChargeModel = testCurve;
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: 10, peakCurrentAmps: 10 },
+    });
+    const wire = new SimWire('battery-spark', 12, 12);
+    const rRt = 2 * wire.resistanceOhms;
+    const loadAmps = 10;
+    // Draw 10 A for 1800 s → 10*(1800/3600)=5 Ah → SoC 1→0 on a 5 Ah pack.
+    const result = simulateMatch(
+      [
+        { t: 0, loadsByDeviceId: { 'spark-1': loadAmps } },
+        { t: 1800, loadsByDeviceId: { 'spark-1': loadAmps } },
+      ],
+      new Map([
+        [battery.id, battery],
+        [spark.id, spark],
+      ]),
+      [{ connectionId: wire.connectionId, from: battery.id, to: spark.id, wire }],
+    );
+
+    const t0 = result.samples[0];
+    const t1 = result.samples[1];
+    // t=0, SoC=1: V_load = 12.6 - 10*(0.011 + R_rt)
+    expect(t0?.stateOfCharge).toBeCloseTo(1, 9);
+    expect(t0?.systemVoltage).toBeCloseTo(12.6 - loadAmps * (0.011 + rRt), 6);
+    // After 5 Ah: SoC=0: V_load = 11.0 - 10*(0.020 + R_rt)
+    expect(t1?.stateOfCharge).toBeCloseTo(0, 9);
+    expect(t1?.systemVoltage).toBeCloseTo(11.0 - loadAmps * (0.02 + rRt), 6);
+    expect(result.issues.some((issue) => issue.code === 'BATTERY_SOC_CURVE_MISSING')).toBe(false);
   });
 });
 
