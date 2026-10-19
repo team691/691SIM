@@ -143,11 +143,13 @@ export function buildPowerNetwork(
   }
 
   for (const edge of powerEdges) {
+    const seriesExtra = edge.seriesResistanceOhms ?? 0;
     resistors.push({
       id: `r:wire:${edge.connectionId}`,
       from: wireEndpoint(components, edge.from, 'upstream'),
       to: wireEndpoint(components, edge.to, 'downstream'),
-      resistanceOhms: edge.wire.resistanceOhms * 2,
+      // Round-trip conductor (2R) plus any optional one-time series add-on.
+      resistanceOhms: edge.wire.resistanceOhms * 2 + seriesExtra,
       kind: 'wire',
       connectionId: edge.connectionId,
       conductorResistanceOhms: edge.wire.resistanceOhms,

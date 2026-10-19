@@ -7,7 +7,9 @@ export type VoltageIssueCode =
   | 'POWER_LOOP_DETECTED'
   | 'SINGULAR_NETWORK'
   | 'PLACEHOLDER_CONSTANT'
-  | 'TALON_SUPPLY_UNRESOLVED';
+  | 'TALON_SUPPLY_UNRESOLVED'
+  | 'LOAD_ITERATION_DIVERGED'
+  | 'BATTERY_SOC_CURVE_MISSING';
 
 export interface VoltageIssue {
   code: VoltageIssueCode;

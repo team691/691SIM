@@ -54,12 +54,8 @@ export function GraphPanel({ state }: GraphPanelProps) {
             <ul className="info-list">
               <li>Nominal current: {estimation.nominalCurrentAmps.toFixed(1)} A</li>
               <li>Peak current: {estimation.peakCurrentAmps.toFixed(1)} A</li>
-              <li>Voltage under load: {estimation.estimatedVoltageUnderLoad.toFixed(2)} V</li>
-              <li>
-                Brownout risk:{' '}
-                <span className={`badge badge-${estimation.brownoutRisk === 'low' ? 'ok' : estimation.brownoutRisk === 'medium' ? 'warning' : 'error'}`}>
-                  {estimation.brownoutRisk}
-                </span>
+              <li className="muted-line">
+                For bus voltage and brownout risk, use the Simulation tab (nodal solver).
               </li>
             </ul>
           </div>
