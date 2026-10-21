@@ -43,8 +43,9 @@ const DISPLAY: Record<string, { folder: string; width: number }> = {
   CANcoder: { folder: 'cancoder', width: 80 },
   Pigeon2: { folder: 'pigeon2', width: 74 },
   Limelight: { folder: 'limelight', width: 84 },
-  PhotonVision: { folder: 'photonvision', width: 80 },
+  USBCamera: { folder: 'usbcamera', width: 80 },
   OrangePi: { folder: 'orangepi', width: 105 },
+  RaspberryPi: { folder: 'raspberrypi', width: 105 },
   Radio: { folder: 'radio', width: 115 },
   EthernetSwitch: { folder: 'ethswitch', width: 110 },
   CANivore: { folder: 'canivore', width: 120 },
@@ -147,13 +148,17 @@ const ALIASES: Record<string, Record<string, Alias>> = {
   CANcoder: { power_in: 'PWR+', ground: 'PWR-', can_bus: 'CAN_H' },
   Pigeon2: { power_in: 'PWR+', ground: 'PWR-', can_bus: 'CAN_H' },
   Limelight: { power_in: 'PWR+', ground: 'PWR-', eth_0: 'ETH' },
-  PhotonVision: {
-    // A USB camera is bus-powered -- power and data share the one connector.
-    eth_0: 'USB',
-    power_in: { nx: 0.3, ny: 0.83 },
-    ground: { nx: 0.7, ny: 0.83 },
+  USBCamera: {
+    // Bus-powered — the only terminal is USB.
+    usb: 'USB',
   },
   OrangePi: {
+    power_in: 'USB_C_PWR',
+    ground: { nx: 0.11, ny: 0.33 },
+    eth_0: 'ETH',
+    usb_a: 'USB3_1',
+  },
+  RaspberryPi: {
     power_in: 'USB_C_PWR',
     ground: { nx: 0.11, ny: 0.33 },
     eth_0: 'ETH',

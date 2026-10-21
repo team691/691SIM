@@ -29,9 +29,11 @@ export const PIGEON2_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
 export const LIMELIGHT_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
-export const PHOTONVISION_MIN_VOLTAGE_VOLTS: number | null = null;
+export const USBCAMERA_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
 export const ORANGEPI_MIN_VOLTAGE_VOLTS: number | null = null;
+// TODO(arihant): datasheet value
+export const RASPBERRYPI_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
 export const RADIO_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
@@ -54,8 +56,9 @@ const MIN_VOLTAGE_BY_TYPE: Record<string, number | null> = {
   CANcoder: CANCODER_MIN_VOLTAGE_VOLTS,
   Pigeon2: PIGEON2_MIN_VOLTAGE_VOLTS,
   Limelight: LIMELIGHT_MIN_VOLTAGE_VOLTS,
-  PhotonVision: PHOTONVISION_MIN_VOLTAGE_VOLTS,
+  USBCamera: USBCAMERA_MIN_VOLTAGE_VOLTS,
   OrangePi: ORANGEPI_MIN_VOLTAGE_VOLTS,
+  RaspberryPi: RASPBERRYPI_MIN_VOLTAGE_VOLTS,
   Radio: RADIO_MIN_VOLTAGE_VOLTS,
   EthernetSwitch: ETHERNET_SWITCH_MIN_VOLTAGE_VOLTS,
   MainBreaker: MAIN_BREAKER_MIN_VOLTAGE_VOLTS,

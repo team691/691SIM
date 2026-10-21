@@ -7,14 +7,15 @@ import limelight from '../../../../component-images/limelight/limelight.png';
 import orangepi from '../../../../component-images/orangepi/orangepi.png';
 import pdh from '../../../../component-images/pdh/pdh.png';
 import pdp from '../../../../component-images/pdp/pdp.png';
-import photonvision from '../../../../component-images/photonvision/photonvision.png';
 import pigeon2 from '../../../../component-images/pigeon2/pigeon2.png';
 import radio from '../../../../component-images/radio/radio.png';
+import raspberrypi from '../../../../component-images/raspberrypi/raspberrypi.png';
 import roborio from '../../../../component-images/roborio/roborio.png';
 import sparkflex from '../../../../component-images/sparkflex/sparkflex.png';
 import sparkmax from '../../../../component-images/sparkmax/sparkmax.png';
 import systemcore from '../../../../component-images/systemcore/systemcore.png';
 import talonfx from '../../../../component-images/talonfx/talonfx.png';
+import usbcamera from '../../../../component-images/usbcamera/usbcamera.png';
 import vrm from '../../../../component-images/vrm/vrm.png';
 
 /**
@@ -31,10 +32,11 @@ const DEVICE_IMAGES: Record<string, string> = {
   OrangePi: orangepi,
   PDH: pdh,
   PDP: pdp,
-  PhotonVision: photonvision,
   Pigeon2: pigeon2,
   Radio: radio,
+  RaspberryPi: raspberrypi,
   RoboRIO: roborio,
+  USBCamera: usbcamera,
   SparkFlex: sparkflex,
   SparkMax: sparkmax,
   SystemCore: systemcore,

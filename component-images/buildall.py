@@ -11,7 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PARTS = [
     "pdh", "pdp", "vrm", "battery", "breaker120",
     "roborio", "systemcore", "sparkmax", "sparkflex", "talonfx",
-    "cancoder", "pigeon2", "limelight", "photonvision", "orangepi",
+    "cancoder", "pigeon2", "limelight", "usbcamera", "orangepi", "raspberrypi",
     "radio", "ethswitch", "canivore",
 ]
 
@@ -29,8 +29,9 @@ DESC = {
     "cancoder":     "CTRE CANcoder magnetic encoder",
     "pigeon2":      "CTRE Pigeon 2 IMU",
     "limelight":    "Limelight 3 vision camera",
-    "photonvision": "Generic USB vision camera (PhotonVision)",
+    "usbcamera":    "Generic USB vision camera (bus-powered)",
     "orangepi":     "Orange Pi 5 vision coprocessor",
+    "raspberrypi":  "Raspberry Pi vision coprocessor",
     "radio":        "Vivid-Hosting VH-109 FRC radio",
     "ethswitch":    "Generic 5-port unmanaged Ethernet switch",
     "canivore":     "CTRE CANivore USB-to-CAN FD adapter",

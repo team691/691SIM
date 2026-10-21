@@ -34,8 +34,10 @@ const CURRENT_DEFAULTS: Record<string, CurrentProfile> = {
   CANcoder: { continuousAmps: 0.1, peakAmps: 0.15, maxVoltage: DEFAULT_MAX_VOLTAGE },
   Pigeon2: { continuousAmps: 0.1, peakAmps: 0.15, maxVoltage: DEFAULT_MAX_VOLTAGE },
   Limelight: { continuousAmps: 2, peakAmps: 3, maxVoltage: DEFAULT_MAX_VOLTAGE },
-  PhotonVision: { continuousAmps: 2, peakAmps: 3, maxVoltage: DEFAULT_MAX_VOLTAGE },
+  // USB cameras are bus-powered from a host USB port, not the 12V PDH rail.
+  USBCamera: { continuousAmps: 0, peakAmps: 0, maxVoltage: DEFAULT_MAX_VOLTAGE },
   OrangePi: { continuousAmps: 2, peakAmps: 3, maxVoltage: DEFAULT_MAX_VOLTAGE },
+  RaspberryPi: { continuousAmps: 2, peakAmps: 3, maxVoltage: DEFAULT_MAX_VOLTAGE },
   Radio: { continuousAmps: 1, peakAmps: 1.5, maxVoltage: DEFAULT_MAX_VOLTAGE },
   EthernetSwitch: { continuousAmps: 0.5, peakAmps: 0.7, maxVoltage: DEFAULT_MAX_VOLTAGE },
   // TODO(arihant): datasheet value
