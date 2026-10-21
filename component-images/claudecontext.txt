@@ -10,7 +10,7 @@ machine-readable port coordinates for wiring validation.
 All 17 components from the original open-items list are now built:
 PDH, PDP, VRM, 12V battery, 120A main breaker, roboRIO 2.0, SystemCore
 (speculative), SPARK MAX, SPARK Flex, Talon FX, CANcoder, Pigeon 2,
-Limelight 3, a generic PhotonVision USB camera, Orange Pi 5, the
+Limelight 3, a generic USB camera, Orange Pi 5, Raspberry Pi, the
 Vivid-Hosting VH-109 radio, and a generic 5-port Ethernet switch.
 
 
@@ -55,7 +55,7 @@ REPO STRUCTURE
   roborio/ systemcore/                           (controllers)
   sparkmax/ sparkflex/ talonfx/                  (motor controllers)
   cancoder/ pigeon2/                             (small CAN sensors)
-  limelight/ photonvision/ orangepi/             (vision)
+  limelight/ usbcamera/ orangepi/ raspberrypi/             (vision)
   radio/ ethswitch/                              (networking)
   each folder: <part>.py, <part>.png, <part>-ports.json
 
@@ -90,8 +90,8 @@ FINAL SPECS
                                     silkscreen, JST-4 pigtail
   limelight     340x300       3     triangular 3-hole mount pattern,
                                     barrel jack 12V (not POE) + ETH
-  photonvision  260x220       1     generic USB camera module, since
-                                    PhotonVision is software not a
+  usbcamera     260x240       1     generic USB camera module (bus-powered)
+  raspberrypi  420x340       5     same layout as Orange Pi, green PCB
                                     specific board
   orangepi      420x340       5     USB-C pwr/ETH/HDMI left, 2xUSB3
                                     right, 40-pin GPIO, SD slot

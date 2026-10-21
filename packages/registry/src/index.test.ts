@@ -30,8 +30,9 @@ describe("builtInDeviceDefinitions", () => {
       "CANcoder",
       "Pigeon2",
       "Limelight",
-      "PhotonVision",
+      "USBCamera",
       "OrangePi",
+      "RaspberryPi",
       "Radio",
       "EthernetSwitch",
       "CANivore",
@@ -55,7 +56,7 @@ describe("builtInDeviceDefinitions", () => {
     ).toHaveLength(2);
     expect(
       createDefaultDeviceRegistry().listByCategory(DeviceCategory.VISION),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
     expect(
       createDefaultDeviceRegistry().listByCategory(DeviceCategory.NETWORK),
     ).toHaveLength(3);

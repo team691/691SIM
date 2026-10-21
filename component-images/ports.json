@@ -1210,9 +1210,9 @@
         }
       }
     },
-    "photonvision": {
-      "description": "Generic USB vision camera (PhotonVision)",
-      "image": "photonvision/photonvision.png",
+    "usbcamera": {
+      "description": "Generic USB vision camera (bus-powered)",
+      "image": "usbcamera/usbcamera.png",
       "width": 260,
       "height": 240,
       "port_count": 1,
@@ -1227,6 +1227,40 @@
     "orangepi": {
       "description": "Orange Pi 5 vision coprocessor",
       "image": "orangepi/orangepi.png",
+      "width": 420,
+      "height": 340,
+      "port_count": 5,
+      "ports": {
+        "USB_C_PWR": {
+          "side": "left",
+          "x": 20,
+          "y": 91.0
+        },
+        "ETH": {
+          "side": "left",
+          "x": 20,
+          "y": 137.0
+        },
+        "HDMI": {
+          "side": "left",
+          "x": 20,
+          "y": 183.0
+        },
+        "USB3_1": {
+          "side": "right",
+          "x": 400,
+          "y": 91.0
+        },
+        "USB3_2": {
+          "side": "right",
+          "x": 400,
+          "y": 137.0
+        }
+      }
+    },
+    "raspberrypi": {
+      "description": "Raspberry Pi vision coprocessor",
+      "image": "raspberrypi/raspberrypi.png",
       "width": 420,
       "height": 340,
       "port_count": 5,

@@ -336,19 +336,33 @@ export const builtInDeviceDefinitions: DeviceDefinition[] = [
     metadata: { role: "vision-camera", nominalCurrentAmps: 2, peakCurrentAmps: 3, weightLbs: 1.2 },
   },
   {
-    type: "PhotonVision",
-    displayName: "PhotonVision",
+    type: "USBCamera",
+    displayName: "USB Camera",
     category: DeviceCategory.VISION,
-    ports: [powerInput(), groundInput(), ethernetPort("eth_0", true)],
-    requirements: [
-      ...poweredDeviceRequirements()!,
-      { portType: PortType.ETHERNET, minConnections: 1 },
-    ],
-    metadata: { role: "vision-software" },
+    // Bus-powered over USB — no separate 12V power/ground terminals.
+    ports: [port("usb", PortType.USBA, PortDirection.BIDIRECTIONAL, true, 1)],
+    requirements: [{ portType: PortType.USBA, minConnections: 1 }],
+    metadata: { role: "usb-vision-camera", weightLbs: 0.2 },
   },
   {
     type: "OrangePi",
     displayName: "Orange Pi",
+    category: DeviceCategory.VISION,
+    ports: [
+      powerInput(),
+      groundInput(),
+      ethernetPort("eth_0", true),
+      port("usb_a", PortType.USBA, PortDirection.BIDIRECTIONAL, false, 4),
+    ],
+    requirements: [
+      ...poweredDeviceRequirements()!,
+      { portType: PortType.ETHERNET, minConnections: 1 },
+    ],
+    metadata: { role: "coprocessor" },
+  },
+  {
+    type: "RaspberryPi",
+    displayName: "Raspberry Pi",
     category: DeviceCategory.VISION,
     ports: [
       powerInput(),

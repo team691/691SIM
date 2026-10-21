@@ -1,9 +1,6 @@
-"""Generic USB vision camera as commonly run under PhotonVision (e.g. an
-Arducam/ELP-style board camera) -- PhotonVision itself is coprocessor
-software, not a specific board, so this represents the camera module
-that plugs into a coprocessor's USB port. Front view: lens + small PCB
-with 2 mounting holes and a USB port recessed into the bottom edge
-(nothing extends past the body outline).
+"""Generic USB vision camera (Arducam/ELP-style board camera). Bus-powered
+over a single USB connector — no separate 12V power terminals. Front view:
+lens + small PCB with 2 mounting holes and a USB port on the bottom edge.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,11 +27,11 @@ circ(d, LENS_CX, LENS_CY, LENS_R, fill=(16, 16, 18), outline=(70, 74, 80), w=4)
 circ(d, LENS_CX, LENS_CY, LENS_R * 0.5, fill=(8, 40, 46))
 circ(d, LENS_CX, LENS_CY, LENS_R * 0.18, fill=(2, 2, 3))
 
-text(d, (130, 20), "Vision Camera", F(BOLD, 13), C["text"])
-text(d, (130, 158), "USB (PhotonVision)", F(REG, 9), C["silk"])
+text(d, (130, 20), "USB Camera", F(BOLD, 13), C["text"])
+text(d, (130, 158), "USB", F(REG, 9), C["silk"])
 
 rr(d, USB_BOX, 4, fill=(216, 218, 222), outline=(150, 152, 158), w=1)
 rect(d, (USB_BOX[0] + 8, USB_BOX[1] + 6, USB_BOX[2] - 8, USB_BOX[3] - 6), fill=(60, 62, 68))
 
-save(im, os.path.join(HERE, "photonvision.png"), W)
-dump_ports(PORT_EDGES, os.path.join(HERE, "photonvision-ports.json"))
+save(im, os.path.join(HERE, "usbcamera.png"), W)
+dump_ports(PORT_EDGES, os.path.join(HERE, "usbcamera-ports.json"))
