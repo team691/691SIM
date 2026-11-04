@@ -453,19 +453,103 @@ describe('simulateCircuit voltage/brownout', () => {
     const result = simulateCircuit(createHealthyRobotModel(), { mode: 'peak' });
     expect(result.voltage.hasBattery).toBe(true);
     expect(result.voltage.systemVoltage).toBeLessThan(result.voltage.batteryVoltage);
-    expect(result.voltage.systemVoltage).toBeGreaterThan(6.3);
+    expect(result.voltage.roborioVoltage).not.toBeNull();
+    expect(result.voltage.roborioVoltage!).toBeGreaterThan(6.3);
     expect(result.voltage.brownoutRisk).toBe(false);
   });
 
-  it('detects brownout risk when loads are extreme', () => {
+  it('detects brownout risk when the roboRIO itself sags below 6.3 V', () => {
     const model = createHealthyRobotModel();
-    // Crank the SparkMax to an unrealistic draw to force a sag below 6.3V.
+    // Crank the SparkMax hard enough that shared battery/path drop pulls the
+    // roboRIO below the brownout threshold (not just a distant branch).
     const spark = model.devices.find((d) => d.id === 'spark-1')!;
     spark.metadata = { ...spark.metadata, peakCurrentAmps: 900 };
 
     const result = simulateCircuit(model, { mode: 'peak' });
+    expect(result.voltage.roborioVoltage).not.toBeNull();
+    expect(result.voltage.roborioVoltage!).toBeLessThan(6.3);
     expect(result.voltage.brownoutRisk).toBe(true);
-    expect(result.diagnostics.some((d) => d.code === 'BROWNOUT_RISK')).toBe(true);
+    const brownout = result.diagnostics.find((d) => d.code === 'BROWNOUT_RISK');
+    expect(brownout).toBeDefined();
+    expect(brownout!.message).toContain(result.voltage.roborioVoltage!.toFixed(2));
+  });
+
+  it('does not raise brownoutRisk when only a non-roboRIO device is below 6.3 V', () => {
+    // Long, thin motor lead sags the SparkMax while the short roboRIO feed stays healthy.
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const rio = createComponent({ id: 'rio-1', type: 'RoboRIO' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: 40, peakCurrentAmps: 40 },
+    });
+    const rioWire = new SimWire('battery-rio', 12, 6);
+    const sparkWire = new SimWire('battery-spark', 18, 240);
+    const result = simulateVoltage(
+      new Map([
+        [battery.id, battery],
+        [rio.id, rio],
+        [spark.id, spark],
+      ]),
+      [
+        { connectionId: rioWire.connectionId, from: battery.id, to: rio.id, wire: rioWire },
+        { connectionId: sparkWire.connectionId, from: battery.id, to: spark.id, wire: sparkWire },
+      ],
+      'peak',
+    );
+
+    const sparkV = volts(result, 'spark-1');
+    const rioV = volts(result, 'rio-1');
+    expect(sparkV).toBeLessThan(6.3);
+    expect(rioV).toBeGreaterThan(6.3);
+    expect(result.systemVoltage).toBe(sparkV);
+    expect(result.roborioVoltage).toBe(rioV);
+    expect(result.brownoutRisk).toBe(false);
+  });
+
+  it('raises brownoutRisk when the roboRIO is below 6.3 V', () => {
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const rio = createComponent({
+      id: 'rio-1',
+      type: 'RoboRIO',
+      metadata: { continuousCurrentAmps: 3, peakCurrentAmps: 3 },
+    });
+    // Extreme length forces the roboRIO node alone below the threshold.
+    const wire = new SimWire('battery-rio', 18, 2400);
+    const result = simulateVoltage(
+      new Map([
+        [battery.id, battery],
+        [rio.id, rio],
+      ]),
+      [{ connectionId: wire.connectionId, from: battery.id, to: rio.id, wire }],
+      'peak',
+    );
+
+    expect(result.roborioVoltage).not.toBeNull();
+    expect(result.roborioVoltage!).toBeLessThan(6.3);
+    expect(result.brownoutRisk).toBe(true);
+  });
+
+  it('reports brownoutRisk false when there is no powered RoboRIO', () => {
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: 80, peakCurrentAmps: 80 },
+    });
+    const wire = new SimWire('battery-spark', 18, 240);
+    const result = simulateVoltage(
+      new Map([
+        [battery.id, battery],
+        [spark.id, spark],
+      ]),
+      [{ connectionId: wire.connectionId, from: battery.id, to: spark.id, wire }],
+      'peak',
+    );
+
+    expect(result.roborioVoltage).toBeNull();
+    expect(result.systemVoltage).toBeLessThan(6.3);
+    expect(result.brownoutRisk).toBe(false);
   });
 
   it('flags an ampacity hazard on an undersized wire', () => {

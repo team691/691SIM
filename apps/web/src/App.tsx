@@ -124,10 +124,11 @@ export default function App() {
 
       {tab === 'editor' && (
         <div className="editor-layout">
-          {state.simulation?.voltage.brownoutRisk && (
+          {state.simulation?.voltage.brownoutRisk &&
+            state.simulation.voltage.roborioVoltage !== null && (
             <div className="sim-alert sim-alert-danger sim-banner" role="alert">
-              RoboRIO brownout risk — system sags to{' '}
-              {state.simulation.voltage.systemVoltage.toFixed(2)} V. Open Simulation for details.
+              RoboRIO brownout risk — roboRIO sags to{' '}
+              {state.simulation.voltage.roborioVoltage.toFixed(2)} V. Open Simulation for details.
             </div>
           )}
           <WireLegend

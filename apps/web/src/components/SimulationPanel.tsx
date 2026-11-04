@@ -48,8 +48,10 @@ export function SimulationPanel({ state }: SimulationPanelProps) {
         </button>
       </div>
 
-      {voltage.brownoutRisk && (
-        <div className="sim-alert sim-alert-danger">⚠ ROBORIO BROWNOUT RISK DETECTED</div>
+      {voltage.brownoutRisk && voltage.roborioVoltage !== null && (
+        <div className="sim-alert sim-alert-danger">
+          ⚠ ROBORIO BROWNOUT RISK DETECTED — roboRIO at {voltage.roborioVoltage.toFixed(2)} V
+        </div>
       )}
 
       {voltage.firstFailure && (
@@ -68,10 +70,18 @@ export function SimulationPanel({ state }: SimulationPanelProps) {
       <div className="sim-metrics">
         <div className="sim-metric">
           <span className="sim-metric-label">System Voltage</span>
+          <span className="sim-metric-value">{voltage.systemVoltage.toFixed(2)} V</span>
+        </div>
+        <div className="sim-metric">
+          <span className="sim-metric-label">RoboRIO Voltage</span>
           <span
-            className={`sim-metric-value ${voltageClass(voltage.systemVoltage, voltage.brownoutThreshold)}`}
+            className={`sim-metric-value ${
+              voltage.roborioVoltage === null
+                ? ''
+                : voltageClass(voltage.roborioVoltage, voltage.brownoutThreshold)
+            }`}
           >
-            {voltage.systemVoltage.toFixed(2)} V
+            {voltage.roborioVoltage === null ? '—' : `${voltage.roborioVoltage.toFixed(2)} V`}
           </span>
         </div>
         <div className="sim-metric">
@@ -98,6 +108,13 @@ export function SimulationPanel({ state }: SimulationPanelProps) {
           </li>
           <li>
             <strong>V_system = {voltage.systemVoltage.toFixed(2)} V</strong>
+            <small>Lowest solved device voltage</small>
+          </li>
+          <li>
+            <strong>
+              V_roboRIO ={' '}
+              {voltage.roborioVoltage === null ? '—' : `${voltage.roborioVoltage.toFixed(2)} V`}
+            </strong>
             <small>Brownout threshold {voltage.brownoutThreshold} V</small>
           </li>
         </ul>

@@ -98,12 +98,12 @@ function buildDiagnostics(
     }
   }
 
-  if (voltage.brownoutRisk) {
+  if (voltage.brownoutRisk && voltage.roborioVoltage !== null) {
     diagnostics.push(
       diag(
         'BROWNOUT_RISK',
         Severity.ERROR,
-        `${BROWNOUT_MESSAGE} — system sags to ${voltage.systemVoltage.toFixed(2)}V under ${voltage.totalCurrentAmps.toFixed(1)}A (${voltage.mode}).`,
+        `${BROWNOUT_MESSAGE} — roboRIO sags to ${voltage.roborioVoltage.toFixed(2)}V under ${voltage.totalCurrentAmps.toFixed(1)}A (${voltage.mode}).`,
       ),
     );
   }

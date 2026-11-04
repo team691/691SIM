@@ -91,6 +91,11 @@ export interface VoltageSimResult {
   dropToLowestDeviceVolts?: number;
   /** Lowest solved device voltage. The per-device values live on `deviceVoltages`. */
   systemVoltage: number;
+  /**
+   * Lowest solved RoboRIO voltage, or null when no powered RoboRIO is in the
+   * model. Brownout risk is based on this value, not `systemVoltage`.
+   */
+  roborioVoltage: number | null;
   brownoutThreshold: number;
   brownoutRisk: boolean;
   wireCurrents: WireCurrentResult[];
@@ -147,8 +152,8 @@ export function buildMotorVoltageLoadModels(
  *
  * Each load is a current sink at its own node. A wire contributes 2·R, so the
  * return conductor is in the drop, and only wires on the path to that node
- * move its voltage. `systemVoltage` remains the lowest of those voltages so
- * existing brownout checks still have one number to read.
+ * move its voltage. `systemVoltage` is the lowest of those voltages;
+ * `brownoutRisk` uses `roborioVoltage` (RoboRIO devices only).
  */
 export function simulateVoltage(
   components: Map<string, CircuitComponent>,
@@ -242,6 +247,15 @@ export function simulateVoltage(
   );
   const systemVoltage = solvedVoltages.length > 0 ? Math.min(...solvedVoltages) : batteryVoltage;
 
+  // RoboRIO brownout protection trips on the controller rail, not on an
+  // arbitrary branch that happens to sag first.
+  const roborioVoltages = deviceVoltages.flatMap((device) => {
+    if (device.voltage === null) return [];
+    if (components.get(device.deviceId)?.type !== 'RoboRIO') return [];
+    return [device.voltage];
+  });
+  const roborioVoltage = roborioVoltages.length > 0 ? Math.min(...roborioVoltages) : null;
+
   // Connected load current sum. With voltage-dependent models this is the
   // last iterate's sink currents on powered nodes.
   let totalCurrentAmps = 0;
@@ -300,8 +314,13 @@ export function simulateVoltage(
     wireVoltageDropTotal,
     dropToLowestDeviceVolts,
     systemVoltage,
+    roborioVoltage,
     brownoutThreshold: BROWNOUT_VOLTAGE_THRESHOLD,
-    brownoutRisk: battery !== undefined && solution.solved && systemVoltage < BROWNOUT_VOLTAGE_THRESHOLD,
+    brownoutRisk:
+      battery !== undefined &&
+      solution.solved &&
+      roborioVoltage !== null &&
+      roborioVoltage < BROWNOUT_VOLTAGE_THRESHOLD,
     wireCurrents,
     deviceVoltages,
     issues: mergedIssues,
@@ -391,6 +410,7 @@ function unsolvedResult(
     wireVoltageDropTotal: 0,
     dropToLowestDeviceVolts: 0,
     systemVoltage: batteryVoltage,
+    roborioVoltage: null,
     brownoutThreshold: BROWNOUT_VOLTAGE_THRESHOLD,
     brownoutRisk: false,
     wireCurrents: [],
