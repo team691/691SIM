@@ -98,6 +98,22 @@ function buildDiagnostics(
     }
   }
 
+  // Real main breakers trip on a time-current curve; this is a conservative
+  // instantaneous "exceeds nameplate rating" approximation, not a trip model.
+  for (const component of components.values()) {
+    if (!(component instanceof Breaker) || component.type !== 'MainBreaker') continue;
+    if (component.ratingAmps === null) continue;
+    if (voltage.totalCurrentAmps <= component.ratingAmps) continue;
+    diagnostics.push(
+      diag(
+        'MAIN_BREAKER_OVERLOAD',
+        Severity.ERROR,
+        `Total draw ${voltage.totalCurrentAmps.toFixed(1)} A exceeds ${component.ratingAmps} A main breaker rating (${voltage.mode}).`,
+        { deviceIds: [component.id] },
+      ),
+    );
+  }
+
   if (voltage.brownoutRisk && voltage.roborioVoltage !== null) {
     diagnostics.push(
       diag(

@@ -573,6 +573,78 @@ describe('simulateCircuit voltage/brownout', () => {
   });
 });
 
+describe('simulateCircuit main-breaker overload', () => {
+  it('does not emit MAIN_BREAKER_OVERLOAD when total draw is under the rating', () => {
+    const result = simulateCircuit(createHealthyRobotModel(), { mode: 'peak' });
+    expect(result.voltage.totalCurrentAmps).toBeLessThan(120);
+    expect(result.diagnostics.filter((d) => d.code === 'MAIN_BREAKER_OVERLOAD')).toHaveLength(0);
+  });
+
+  it('emits exactly one MAIN_BREAKER_OVERLOAD when peak draw exceeds the rating', () => {
+    const model = createHealthyRobotModel();
+    const spark = model.devices.find((d) => d.id === 'spark-1')!;
+    spark.metadata = { ...spark.metadata, peakCurrentAmps: 200, continuousCurrentAmps: 40 };
+
+    const result = simulateCircuit(model, { mode: 'peak' });
+    expect(result.voltage.totalCurrentAmps).toBeGreaterThan(120);
+    const overloads = result.diagnostics.filter((d) => d.code === 'MAIN_BREAKER_OVERLOAD');
+    expect(overloads).toHaveLength(1);
+    expect(overloads[0]?.deviceIds).toEqual(['breaker-1']);
+    expect(overloads[0]?.message).toContain('exceeds');
+    expect(overloads[0]?.message).toContain('120 A');
+    expect(overloads[0]?.message).toContain('peak');
+    expect(overloads[0]?.severity).toBe(2);
+  });
+
+  it('emits no MAIN_BREAKER_OVERLOAD when the model has no MainBreaker', () => {
+    const model = createHealthyRobotModel();
+    model.devices = model.devices.filter((d) => d.type !== 'MainBreaker');
+    model.connections = model.connections.filter(
+      (c) => c.sourceDevice !== 'breaker-1' && c.targetDevice !== 'breaker-1',
+    );
+    // Battery feeds PDH directly so the circuit still solves.
+    model.connections.push(
+      {
+        id: 'battery-pdh-power',
+        sourceDevice: 'battery-1',
+        sourcePort: 'main_power',
+        targetDevice: 'pdh-1',
+        targetPort: 'main_power_in',
+      },
+      {
+        id: 'battery-pdh-ground',
+        sourceDevice: 'battery-1',
+        sourcePort: 'ground',
+        targetDevice: 'pdh-1',
+        targetPort: 'ground_in',
+      },
+    );
+    const spark = model.devices.find((d) => d.id === 'spark-1')!;
+    spark.metadata = { ...spark.metadata, peakCurrentAmps: 200 };
+
+    const result = simulateCircuit(model, { mode: 'peak' });
+    expect(result.voltage.totalCurrentAmps).toBeGreaterThan(120);
+    expect(result.diagnostics.filter((d) => d.code === 'MAIN_BREAKER_OVERLOAD')).toHaveLength(0);
+  });
+
+  it('flags overload in peak mode while continuous mode stays under the same rating', () => {
+    const model = createHealthyRobotModel();
+    const spark = model.devices.find((d) => d.id === 'spark-1')!;
+    // Continuous under 120 A; peak over 120 A.
+    spark.metadata = { ...spark.metadata, continuousCurrentAmps: 80, peakCurrentAmps: 200 };
+
+    const continuous = simulateCircuit(model, { mode: 'continuous' });
+    expect(continuous.voltage.totalCurrentAmps).toBeLessThan(120);
+    expect(continuous.diagnostics.filter((d) => d.code === 'MAIN_BREAKER_OVERLOAD')).toHaveLength(0);
+
+    const peak = simulateCircuit(model, { mode: 'peak' });
+    expect(peak.voltage.totalCurrentAmps).toBeGreaterThan(120);
+    const overloads = peak.diagnostics.filter((d) => d.code === 'MAIN_BREAKER_OVERLOAD');
+    expect(overloads).toHaveLength(1);
+    expect(overloads[0]?.message).toContain('(peak)');
+  });
+});
+
 describe('verifyCanTopology', () => {
   function components(entries: Array<[string, string]>) {
     const map = new Map();

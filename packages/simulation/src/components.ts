@@ -195,10 +195,16 @@ export class GenericLoad extends CircuitComponent {
 export class Breaker extends CircuitComponent {
   readonly category = 'breaker';
   readonly isClosed: boolean;
+  /**
+   * Trip rating in amps from device/definition metadata. Null when unset —
+   * overload checks skip breakers without a rating rather than inventing one.
+   */
+  readonly ratingAmps: number | null;
 
-  constructor(init: ComponentInit, isClosed = true) {
+  constructor(init: ComponentInit, isClosed = true, ratingAmps: number | null = null) {
     super(init);
     this.isClosed = isClosed;
+    this.ratingAmps = ratingAmps;
   }
 
   blocksDownstreamPower(): boolean {
@@ -291,7 +297,12 @@ export function createComponent(
       return new VoltageRegulator(init);
     case 'MainBreaker': {
       const closed = instance.metadata?.breakerClosed !== false;
-      return new Breaker(init, closed);
+      const ratingRaw = instance.metadata?.ratingAmps ?? definition?.metadata?.ratingAmps;
+      const ratingAmps =
+        typeof ratingRaw === 'number' && Number.isFinite(ratingRaw) && ratingRaw > 0
+          ? ratingRaw
+          : null;
+      return new Breaker(init, closed, ratingAmps);
     }
     case 'SparkMax':
     case 'SparkFlex':
