@@ -3,3 +3,6 @@ dist/
 *.tsbuildinfo
 .corepack/
 691SIM/
+.DS_Store
+**/.DS_Store
+
