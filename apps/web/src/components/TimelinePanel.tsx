@@ -7,11 +7,10 @@ import {
   type MatchVoltageSample,
 } from '@691sim/simulation';
 import type { RobotModelState } from '../hooks/useRobotModel';
-import { useMatchTimeline } from '../hooks/useMatchTimeline';
+import { useMatchTimeline, type VisibleTimelineScenario } from '../hooks/useMatchTimeline';
 import {
   SCENARIO_LABELS,
   type MatchTimelineBuild,
-  type MatchTimelineScenario,
 } from '../utils/matchTimeline';
 import {
   pathVoltageCloses,
@@ -58,45 +57,52 @@ function chartYCurrent(amps: number, iMax: number): number {
   return PAD.top + ((span - amps) / span) * inner;
 }
 
-function defaultSampleIndex(samples: MatchVoltageSample[], firstBrownoutT: number | null): number {
-  if (samples.length === 0) return 0;
-  if (firstBrownoutT !== null) {
-    const idx = samples.findIndex((s) => s.t === firstBrownoutT);
-    if (idx >= 0) return idx;
+/** Nearest sample at or before t; falls back to the first sample. */
+function sampleAtOrBefore(samples: MatchVoltageSample[], t: number): MatchVoltageSample | null {
+  if (samples.length === 0) return null;
+  let best = samples[0]!;
+  for (const sample of samples) {
+    if (sample.t <= t) best = sample;
+    else break;
   }
-  let best = 0;
+  return best;
+}
+
+function defaultScrubTime(samples: MatchVoltageSample[], firstBrownoutT: number | null): number {
+  if (firstBrownoutT !== null) return firstBrownoutT;
+  let bestT = samples[0]?.t ?? 0;
   let bestV = Number.POSITIVE_INFINITY;
-  samples.forEach((sample, index) => {
-    if (sample.roborioVoltage === null) return;
+  for (const sample of samples) {
+    if (sample.roborioVoltage === null) continue;
     if (sample.roborioVoltage < bestV) {
       bestV = sample.roborioVoltage;
-      best = index;
+      bestT = sample.t;
     }
-  });
-  return best;
+  }
+  return bestT;
 }
 
 export function TimelinePanel({ state }: TimelinePanelProps) {
   const { model, registry, setPowerPathHighlight, clearPowerPathHighlight } = state;
-  const { scenario, setScenario, swerveAvailable, timeline } = useMatchTimeline(model, registry);
-  const [sampleIndex, setSampleIndex] = useState(0);
+  const { scenario, setScenario, timeline } = useMatchTimeline(model, registry);
+  /** Scrubber position in match seconds (0…135), not sample index. */
+  const [scrubTime, setScrubTime] = useState(0);
 
-  const scenarios: MatchTimelineScenario[] = ['nominal', 'peak', 'swerve-example'];
+  const scenarios: VisibleTimelineScenario[] = ['nominal', 'peak'];
 
+  // Reset scrubber only when the scenario changes — not on every timeline object identity.
   useEffect(() => {
     if (!timeline.ok) {
       clearPowerPathHighlight();
       return;
     }
-    setSampleIndex(defaultSampleIndex(timeline.match.samples, timeline.match.firstBrownout?.t ?? null));
-  }, [timeline, clearPowerPathHighlight]);
+    setScrubTime(defaultScrubTime(timeline.match.samples, timeline.match.firstBrownout?.t ?? null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: scenario only
+  }, [scenario]);
 
-  const selectedSample =
-    timeline.ok && timeline.match.samples.length > 0
-      ? timeline.match.samples[
-          Math.min(sampleIndex, timeline.match.samples.length - 1)
-        ]!
-      : null;
+  const selectedSample = timeline.ok
+    ? sampleAtOrBefore(timeline.match.samples, scrubTime)
+    : null;
 
   const pathAnalysis = useMemo((): PathAnalysis | null => {
     if (!timeline.ok || !selectedSample) return null;
@@ -161,25 +167,17 @@ export function TimelinePanel({ state }: TimelinePanelProps) {
     <div className="panel-content sim-panel timeline-panel">
       <div className="sim-mode-toggle">
         <span>Scenario:</span>
-        {scenarios.map((id) => {
-          const disabled = id === 'swerve-example' && !swerveAvailable;
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`btn ${scenario === id ? 'btn-primary' : ''}`}
-              disabled={disabled}
-              title={
-                disabled
-                  ? 'Needs standard swerve drive/steer device ids (swerve-fl-drive, …). Load a swerve sample or rename devices to match.'
-                  : SCENARIO_LABELS[id]
-              }
-              onClick={() => setScenario(id)}
-            >
-              {id}
-            </button>
-          );
-        })}
+        {scenarios.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={`btn ${scenario === id ? 'btn-primary' : ''}`}
+            title={SCENARIO_LABELS[id]}
+            onClick={() => setScenario(id)}
+          >
+            {id}
+          </button>
+        ))}
       </div>
 
       {!timeline.ok ? (
@@ -188,8 +186,9 @@ export function TimelinePanel({ state }: TimelinePanelProps) {
         <>
           <TimelineChart
             build={timeline}
-            selectedIndex={Math.min(sampleIndex, timeline.match.samples.length - 1)}
-            onSelectIndex={setSampleIndex}
+            scrubTime={scrubTime}
+            onScrubTime={setScrubTime}
+            selectedSample={selectedSample}
           />
           <PathBreakdown analysis={pathAnalysis} />
         </>
@@ -200,12 +199,14 @@ export function TimelinePanel({ state }: TimelinePanelProps) {
 
 function TimelineChart({
   build,
-  selectedIndex,
-  onSelectIndex,
+  scrubTime,
+  onScrubTime,
+  selectedSample,
 }: {
   build: Extract<MatchTimelineBuild, { ok: true }>;
-  selectedIndex: number;
-  onSelectIndex: (index: number) => void;
+  scrubTime: number;
+  onScrubTime: (t: number) => void;
+  selectedSample: MatchVoltageSample | null;
 }) {
   const { match, caption } = build;
   const samples = match.samples;
@@ -233,7 +234,7 @@ function TimelineChart({
     ? samples.find((s) => s.roborioVoltage === minRio) ?? samples[0]
     : null;
   const peakCurrent = Math.max(0, ...currents);
-  const selected = samples[selectedIndex];
+  const selected = selectedSample;
 
   const description = [
     hasRio
@@ -307,15 +308,13 @@ function TimelineChart({
 
         <polyline points={currentPoints} className="timeline-current-line" fill="none" />
 
-        {selected && (
-          <line
-            x1={chartX(selected.t)}
-            y1={PAD.top}
-            x2={chartX(selected.t)}
-            y2={CHART_HEIGHT - PAD.bottom}
-            className="timeline-scrubber"
-          />
-        )}
+        <line
+          x1={chartX(scrubTime)}
+          y1={PAD.top}
+          x2={chartX(scrubTime)}
+          y2={CHART_HEIGHT - PAD.bottom}
+          className="timeline-scrubber"
+        />
 
         {firstFail && (
           <g>
@@ -358,7 +357,7 @@ function TimelineChart({
       {samples.length > 0 && (
         <label className="timeline-scrubber-control">
           <span>
-            Sample t = {selected?.t ?? 0} s
+            t = {scrubTime} s
             {selected?.roborioVoltage != null
               ? ` · roboRIO ${selected.roborioVoltage.toFixed(2)} V`
               : ''}
@@ -367,11 +366,11 @@ function TimelineChart({
           <input
             type="range"
             min={0}
-            max={Math.max(0, samples.length - 1)}
+            max={MATCH_DURATION_SECONDS}
             step={1}
-            value={Math.min(selectedIndex, samples.length - 1)}
+            value={scrubTime}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
-              onSelectIndex(Number(e.target.value))
+              onScrubTime(Number(e.target.value))
             }
           />
         </label>
