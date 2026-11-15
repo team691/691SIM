@@ -31,6 +31,11 @@ export function useRobotModel(initial: RobotModel) {
   const [simulationMode, setSimulationMode] = useState<LoadMode>('peak');
   const [wireMessage, setWireMessage] = useState<string | null>(null);
   const [showWireLabels, setShowWireLabels] = useState(true);
+  /** Timeline brownout-path highlight on the editor canvas. */
+  const [powerPathConnectionIds, setPowerPathConnectionIds] = useState<string[]>([]);
+  const [powerPathDropByConnection, setPowerPathDropByConnection] = useState<Record<string, number>>(
+    {},
+  );
 
   const registry = useMemo(() => createDefaultDeviceRegistry(), []);
 
@@ -353,6 +358,19 @@ export function useRobotModel(initial: RobotModel) {
     if (connectionIds?.[0]) setSelectedConnectionId(connectionIds[0]);
   }, []);
 
+  const setPowerPathHighlight = useCallback(
+    (connectionIds: string[], dropsByConnection: Record<string, number> = {}) => {
+      setPowerPathConnectionIds(connectionIds);
+      setPowerPathDropByConnection(dropsByConnection);
+    },
+    [],
+  );
+
+  const clearPowerPathHighlight = useCallback(() => {
+    setPowerPathConnectionIds([]);
+    setPowerPathDropByConnection({});
+  }, []);
+
   const validateCurrent = useCallback(() => validateProject(model), [model]);
 
   return {
@@ -401,6 +419,10 @@ export function useRobotModel(initial: RobotModel) {
     tryConnect,
     cancelWire,
     focusDiagnostic,
+    powerPathConnectionIds,
+    powerPathDropByConnection,
+    setPowerPathHighlight,
+    clearPowerPathHighlight,
     validateCurrent,
   };
 }

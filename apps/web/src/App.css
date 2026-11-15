@@ -1356,3 +1356,37 @@
     transparent 4px 8px
   );
 }
+
+.timeline-scrubber {
+  stroke: var(--text);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+
+.timeline-scrubber-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 720px;
+  margin: 0.5rem 0 0.75rem;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.timeline-scrubber-control input[type='range'] {
+  width: 100%;
+}
+
+.timeline-path-list {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+
+.timeline-path-list li {
+  margin: 0.25rem 0;
+}
+
+.connection-group.power-path path {
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--accent, #1a8a9a) 55%, transparent));
+}

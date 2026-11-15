@@ -214,7 +214,10 @@ function ConnectionLines({
     fuseViolationConnectionIds,
     simulation,
     showWireLabels,
+    powerPathConnectionIds,
+    powerPathDropByConnection,
   } = state;
+  const powerPathSet = new Set(powerPathConnectionIds);
 
   const getCenter = (deviceId: string) => {
     const device = model.devices.find((d) => d.id === deviceId);
@@ -360,13 +363,17 @@ function ConnectionLines({
         const isHighlighted =
           highlightDeviceIds.includes(conn.sourceDevice) ||
           highlightDeviceIds.includes(conn.targetDevice);
-        const opacity = isSelected || isHighlighted ? 1 : 0.92;
+        const onPowerPath = powerPathSet.has(conn.id);
+        const pathDrop = powerPathDropByConnection[conn.id];
+        const opacity = isSelected || isHighlighted || onPowerPath ? 1 : 0.92;
         const pairOffset = visual.kind === 'pair' ? 5 : 0;
+        const pathStroke = onPowerPath ? 'var(--accent, #1a8a9a)' : null;
+        const pathWidth = onPowerPath ? visual.width + 2.5 : visual.width;
 
         return (
           <g
             key={`wire-${conn.id}`}
-            className={`connection-group ${isSelected ? 'selected' : ''} ${isHighlighted ? 'highlighted' : ''}`}
+            className={`connection-group ${isSelected ? 'selected' : ''} ${isHighlighted ? 'highlighted' : ''} ${onPowerPath ? 'power-path' : ''}`}
             opacity={opacity}
             onClick={(e: { stopPropagation(): void }) => {
               e.stopPropagation();
@@ -376,17 +383,34 @@ function ConnectionLines({
           >
             {visual.kind === 'pair' ? (
               <>
-                <WirePath path={route.path} color={visual.colors[0]!} width={visual.width} offset={-pairOffset} />
-                <WirePath path={route.path} color={visual.colors[1]!} width={visual.width} offset={pairOffset} />
+                <WirePath
+                  path={route.path}
+                  color={pathStroke ?? visual.colors[0]!}
+                  width={pathWidth}
+                  offset={-pairOffset}
+                />
+                <WirePath
+                  path={route.path}
+                  color={pathStroke ?? visual.colors[1]!}
+                  width={pathWidth}
+                  offset={pairOffset}
+                />
               </>
             ) : (
-              <WirePath path={route.path} color={visual.colors[0]!} width={visual.width} />
+              <WirePath
+                path={route.path}
+                color={pathStroke ?? visual.colors[0]!}
+                width={pathWidth}
+              />
             )}
             <title>
               {visual.label}: {conn.sourceDevice}.{conn.sourcePort} → {conn.targetDevice}.
               {conn.targetPort}
               {annotation ? ` · ${annotation}` : ''}
               {fuseFault ? ' — FUSE UNDERSIZED' : ''}
+              {onPowerPath && pathDrop !== undefined
+                ? ` · path drop ${pathDrop.toFixed(3)} V`
+                : ''}
             </title>
           </g>
         );
@@ -426,12 +450,18 @@ function ConnectionLines({
             if (!labelInfo.show || !labelInfo.text) return null;
             const labelPos = labelPositions.get(conn.id);
             if (!labelPos) return null;
-            const displayDetail =
+            const pathDrop = powerPathDropByConnection[conn.id];
+            const onPowerPath = powerPathSet.has(conn.id);
+            let displayDetail =
               labelInfo.detail && labelInfo.detail !== labelInfo.text
                 ? labelInfo.detail
                 : annotation && annotation !== labelInfo.text
                   ? annotation
                   : undefined;
+            if (onPowerPath && pathDrop !== undefined) {
+              const dropText = `ΔV ${pathDrop.toFixed(3)} V`;
+              displayDetail = displayDetail ? `${displayDetail} · ${dropText}` : dropText;
+            }
             return (
               <g key={`label-${conn.id}`}>
                 <WireLabel
