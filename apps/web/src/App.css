@@ -1241,3 +1241,152 @@
   color: var(--text-muted);
   font-size: 0.74rem;
 }
+
+.timeline-panel {
+  max-width: 900px;
+}
+
+.timeline-caption {
+  margin: 0.5rem 0 0.35rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.timeline-chart {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  display: block;
+  margin: 0.75rem 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.timeline-plot-bg {
+  fill: transparent;
+}
+
+.timeline-grid {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.timeline-axis-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.timeline-threshold {
+  stroke: var(--danger);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.timeline-threshold-label {
+  fill: var(--danger);
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.timeline-rio-line {
+  stroke: var(--accent, #1a8a9a);
+  stroke-width: 2.5;
+}
+
+.timeline-current-line {
+  stroke: var(--warning, #d97706);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  opacity: 0.9;
+}
+
+.timeline-fail-marker {
+  fill: var(--danger);
+  stroke: var(--bg-panel);
+  stroke-width: 1.5;
+}
+
+.timeline-fail-label {
+  fill: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.timeline-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.timeline-swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: 1px;
+  display: inline-block;
+}
+
+.timeline-swatch-rio {
+  background: var(--accent, #1a8a9a);
+}
+
+.timeline-swatch-current {
+  background: var(--warning, #d97706);
+}
+
+.timeline-swatch-threshold {
+  background: var(--danger);
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--danger) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.timeline-scrubber {
+  stroke: var(--text);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+
+.timeline-scrubber-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 720px;
+  margin: 0.5rem 0 0.75rem;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.timeline-scrubber-control input[type='range'] {
+  width: 100%;
+}
+
+.timeline-path-list {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+
+.timeline-path-list li {
+  margin: 0.25rem 0;
+}
+
+.connection-group.power-path path {
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--accent, #1a8a9a) 55%, transparent));
+}

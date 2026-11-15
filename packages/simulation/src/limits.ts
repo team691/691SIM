@@ -1,8 +1,10 @@
 /**
  * Minimum bus voltage for each device type.
  *
- * The roboRIO value is the existing brownout threshold (6.3 V). Every other
- * constant is intentionally empty: do not fill it in without a datasheet.
+ * The roboRIO value is the existing brownout threshold (6.3 V). A few other
+ * types have values supplied for simulation (not datasheet-verified; source
+ * links are still PENDING). Every remaining constant stays null until a
+ * datasheet value is entered.
  */
 export const ROBORIO_MIN_VOLTAGE_VOLTS = 6.3;
 
@@ -10,18 +12,19 @@ export const ROBORIO_MIN_VOLTAGE_VOLTS = 6.3;
 export const BATTERY_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
 export const SYSTEMCORE_MIN_VOLTAGE_VOLTS: number | null = null;
-// TODO(arihant): datasheet value
-export const PDH_MIN_VOLTAGE_VOLTS: number | null = null;
+// value supplied by Arihant; datasheet source link: PENDING
+export const PDH_MIN_VOLTAGE_VOLTS: number | null = 4.75;
 // TODO(arihant): datasheet value
 export const PDP_MIN_VOLTAGE_VOLTS: number | null = null;
-// TODO(arihant): datasheet value
-export const VRM_MIN_VOLTAGE_VOLTS: number | null = null;
-// TODO(arihant): datasheet value
-export const SPARKMAX_MIN_VOLTAGE_VOLTS: number | null = null;
+// value supplied by Arihant; datasheet source link: PENDING
+export const VRM_MIN_VOLTAGE_VOLTS: number | null = 5.0;
+// value supplied by Arihant; datasheet source link: PENDING
+export const SPARKMAX_MIN_VOLTAGE_VOLTS: number | null = 5.5;
 // TODO(arihant): datasheet value
 export const SPARKFLEX_MIN_VOLTAGE_VOLTS: number | null = null;
-// TODO(arihant): datasheet value
-export const TALONFX_MIN_VOLTAGE_VOLTS: number | null = null;
+// value supplied by Arihant; datasheet source link: PENDING
+// Applies to Kraken X60 / X44 (Talon FX devices).
+export const TALONFX_MIN_VOLTAGE_VOLTS: number | null = 6.0;
 // TODO(arihant): datasheet value
 export const CANCODER_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
@@ -34,8 +37,9 @@ export const USBCAMERA_MIN_VOLTAGE_VOLTS: number | null = null;
 export const ORANGEPI_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value
 export const RASPBERRYPI_MIN_VOLTAGE_VOLTS: number | null = null;
-// TODO(arihant): datasheet value
-export const RADIO_MIN_VOLTAGE_VOLTS: number | null = null;
+// value supplied by Arihant; datasheet source link: PENDING
+// Mapped to registry type "Radio" (currently labeled OpenMesh, not VH-109).
+export const RADIO_MIN_VOLTAGE_VOLTS: number | null = 4.5;
 // TODO(arihant): datasheet value
 export const ETHERNET_SWITCH_MIN_VOLTAGE_VOLTS: number | null = null;
 // TODO(arihant): datasheet value

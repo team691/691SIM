@@ -10,16 +10,18 @@ import { RegistryExplorer } from './components/RegistryExplorer';
 import { JsonPanel } from './components/JsonPanel';
 import { GraphPanel } from './components/GraphPanel';
 import { SimulationPanel } from './components/SimulationPanel';
+import { TimelinePanel } from './components/TimelinePanel';
 import { CollapsiblePanel } from './components/CollapsiblePanel';
 import { useRobotModel } from './hooks/useRobotModel';
 import { useTheme } from './hooks/useTheme';
 import { createHealthyModel } from './utils/labels';
 
-type Tab = 'editor' | 'simulation' | 'registry' | 'json' | 'graph';
+type Tab = 'editor' | 'simulation' | 'timeline' | 'registry' | 'json' | 'graph';
 
 const TAB_HINTS: Record<Tab, string> = {
   editor: 'Place devices, wire ports together, and verify your robot circuit.',
   simulation: 'Run the physics engine: live voltage, brownout risk, wire ampacity, and CAN topology.',
+  timeline: 'Model a 135 s match load profile and watch brownout develop over time.',
   registry: 'Browse built-in FRC device specs, ports, and requirements.',
   json: 'Import, export, or hand-edit the project JSON file.',
   graph: 'See power, CAN, network reachability, and load estimations.',
@@ -105,6 +107,7 @@ export default function App() {
           [
             ['editor', 'Editor'],
             ['simulation', 'Simulation'],
+            ['timeline', 'Timeline'],
             ['registry', 'Registry'],
             ['json', 'JSON'],
             ['graph', 'Graph'],
@@ -164,6 +167,12 @@ export default function App() {
       {tab === 'simulation' && (
         <div className="tab-panel">
           <SimulationPanel state={state} />
+        </div>
+      )}
+
+      {tab === 'timeline' && (
+        <div className="tab-panel">
+          <TimelinePanel state={state} />
         </div>
       )}
 
