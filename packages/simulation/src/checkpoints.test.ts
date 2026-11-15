@@ -140,6 +140,36 @@ describe('simulateMatch', () => {
     expect(result.firstBrownout?.t).toBe(135);
     expect(result.firstBrownout?.deviceId).toBe('rio-1');
     expect(result.firstBrownout?.minVoltage).toBe(6.3);
+    expect(low?.roborioVoltage).toBeCloseTo(12.6 - lowAmps * seriesOhms, 6);
+    expect(high?.roborioVoltage).toBeCloseTo(12.6 - highAmps * seriesOhms, 6);
+    expect(low?.batteryVoltage).toBe(12.6);
+    expect(low?.internalVoltageDrop).toBeCloseTo(lowAmps * 0.011, 6);
+    expect(low?.wireCurrents).toHaveLength(1);
+    expect(low?.wireCurrents[0]?.currentAmps).toBeCloseTo(lowAmps, 6);
+  });
+
+  it('reports roborioVoltage null when the model has no RoboRIO', () => {
+    const battery = createComponent({ id: 'battery-1', type: 'Battery' });
+    const spark = createComponent({
+      id: 'spark-1',
+      type: 'SparkMax',
+      metadata: { continuousCurrentAmps: 10, peakCurrentAmps: 10 },
+    });
+    const wire = new SimWire('battery-spark', 12, 12);
+    const result = simulateMatch(
+      [
+        { t: 0, loadsByDeviceId: {} },
+        { t: 135, loadsByDeviceId: {} },
+      ],
+      new Map([
+        [battery.id, battery],
+        [spark.id, spark],
+      ]),
+      [{ connectionId: wire.connectionId, from: battery.id, to: spark.id, wire }],
+      'peak',
+    );
+    expect(result.samples[0]?.roborioVoltage).toBeNull();
+    expect(result.samples[0]?.wireCurrents[0]?.from).toBe('battery-1');
   });
 
   it('ignores SoC when the curve is still a null placeholder and reports an issue', () => {

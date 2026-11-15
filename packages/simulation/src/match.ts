@@ -2,13 +2,14 @@ import {
   interpolateBatteryElectricals,
   isBatterySocModelUsable,
 } from './batterySoc.js';
-import { Battery, type CircuitComponent } from './components.js';
+import { Battery, type CircuitComponent, type LoadMode } from './components.js';
 import type { UndervoltageDevice } from './limits.js';
 import type { VoltageIssue } from './solve.js';
 import {
   simulateVoltage,
   type DeviceVoltage,
   type PowerEdge,
+  type WireCurrentResult,
 } from './voltage.js';
 
 /** An FRC match, from the start of auto through the end of teleop. */
@@ -25,7 +26,16 @@ export interface MatchVoltageSample {
   t: number;
   deviceVoltages: DeviceVoltage[];
   systemVoltage: number;
+  /**
+   * Lowest solved RoboRIO voltage at this sample, or null when no powered
+   * RoboRIO is in the model.
+   */
+  roborioVoltage: number | null;
   totalCurrentAmps: number;
+  batteryVoltage: number;
+  internalVoltageDrop: number;
+  /** Per-connection currents and drops from this sample's solve. */
+  wireCurrents: WireCurrentResult[];
   undervoltage: UndervoltageDevice[];
   /** Present when a usable battery SoC model drove this sample. */
   stateOfCharge?: number;
@@ -51,13 +61,27 @@ function cloneComponents(
   return new Map(components);
 }
 
+function lowestRoborioVoltage(
+  components: Map<string, CircuitComponent>,
+  deviceVoltages: DeviceVoltage[],
+): number | null {
+  const voltages = deviceVoltages.flatMap((row) => {
+    if (row.voltage === null) return [];
+    if (components.get(row.deviceId)?.type !== 'RoboRIO') return [];
+    return [row.voltage];
+  });
+  return voltages.length > 0 ? Math.min(...voltages) : null;
+}
+
 /**
  * Solve the power network at each sample of a match profile.
  *
  * `loadsByDeviceId` replaces that device's steady draw for the sample and is
  * already supply current: callers convert stator current before it gets here.
- * Devices missing from a sample keep their component draw. The first brownout
- * is the earliest time a device with a known minimum falls below it.
+ * Devices missing from a sample keep their component draw for `mode`
+ * (`continuous` by default; pass `peak` for worst-case flat profiles).
+ * The first brownout is the earliest time a device with a known minimum falls
+ * below it.
  *
  * When the battery has a usable SoC model, open-circuit voltage and internal
  * resistance are updated between samples by coulomb counting. If the model is
@@ -68,6 +92,7 @@ export function simulateMatch(
   profile: readonly MatchLoadSample[],
   components: Map<string, CircuitComponent>,
   powerEdges: PowerEdge[],
+  mode: LoadMode = 'continuous',
 ): MatchSimResult {
   const ordered = [...profile].sort((a, b) => a.t - b.t);
   const samples: MatchVoltageSample[] = [];
@@ -117,7 +142,7 @@ export function simulateMatch(
     const result = simulateVoltage(
       working,
       powerEdges,
-      'continuous',
+      mode,
       new Map(Object.entries(sample.loadsByDeviceId)),
     );
     if (result.issues.some((issue) => issue.code === 'PLACEHOLDER_CONSTANT' || issue.code === 'TALON_SUPPLY_UNRESOLVED')) {
@@ -128,7 +153,11 @@ export function simulateMatch(
       t: sample.t,
       deviceVoltages: result.deviceVoltages,
       systemVoltage: result.systemVoltage,
+      roborioVoltage: lowestRoborioVoltage(working, result.deviceVoltages),
       totalCurrentAmps: result.totalCurrentAmps,
+      batteryVoltage: result.batteryVoltage,
+      internalVoltageDrop: result.internalVoltageDrop,
+      wireCurrents: result.wireCurrents,
       undervoltage: result.undervoltage,
     };
     if (socUsable && stateOfCharge !== null) {
