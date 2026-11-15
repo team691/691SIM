@@ -8,8 +8,11 @@ import {
   type MatchTimelineScenario,
 } from '../utils/matchTimeline';
 
+/** Scenarios currently offered in the Timeline UI (swerve-example is hidden for now). */
+export type VisibleTimelineScenario = 'nominal' | 'peak';
+
 export function useMatchTimeline(model: RobotModel, registry: DeviceRegistry) {
-  const [scenario, setScenario] = useState<MatchTimelineScenario>('peak');
+  const [scenario, setScenario] = useState<VisibleTimelineScenario>('peak');
 
   const swerveAvailable = useMemo(() => modelSupportsSwerveExample(model), [model]);
 

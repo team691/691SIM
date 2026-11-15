@@ -43,13 +43,31 @@ export type MatchTimelineBuild =
       reason: string;
     };
 
+/** One sample per second so the Timeline scrubber can move across the match. */
+export const FLAT_PROFILE_STEP_SECONDS = 1;
+
+/** Flat load profile: same empty overrides at each scrubber step (device draw from mode). */
+export function buildFlatMatchProfile(
+  stepSeconds: number = FLAT_PROFILE_STEP_SECONDS,
+): { t: number; loadsByDeviceId: Record<string, number> }[] {
+  const step = stepSeconds > 0 ? stepSeconds : 1;
+  const profile: { t: number; loadsByDeviceId: Record<string, number> }[] = [];
+  for (let t = 0; t <= MATCH_DURATION_SECONDS; t += step) {
+    profile.push({ t, loadsByDeviceId: {} });
+  }
+  if (profile[profile.length - 1]?.t !== MATCH_DURATION_SECONDS) {
+    profile.push({ t: MATCH_DURATION_SECONDS, loadsByDeviceId: {} });
+  }
+  return profile;
+}
+
 /**
  * Run a match-profile simulation for the Timeline tab.
  *
- * nominal / peak: flat two-point profiles that reuse simulateMatch's load mode
- * (continuous vs peak) with empty overrides so each device keeps its component draw.
+ * nominal / peak: flat profiles sampled every second so the scrubber can move;
+ * empty overrides mean each device keeps its component draw for that mode.
  * swerve-example: buildSwerveMatchProfile, only when the model has the expected
- * swerve device ids.
+ * swerve device ids (UI may hide this scenario until later).
  */
 export function buildMatchTimeline(
   model: RobotModel,
@@ -82,11 +100,7 @@ export function buildMatchTimeline(
   }
 
   const mode = scenario === 'peak' ? 'peak' : 'continuous';
-  const profile = [
-    { t: 0, loadsByDeviceId: {} },
-    { t: MATCH_DURATION_SECONDS, loadsByDeviceId: {} },
-  ];
-  const match = simulateMatch(profile, components, powerEdges, mode);
+  const match = simulateMatch(buildFlatMatchProfile(), components, powerEdges, mode);
   return {
     ok: true,
     scenario,

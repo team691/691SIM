@@ -19,8 +19,15 @@ describe('buildMatchTimeline', () => {
     expect(peak.ok).toBe(true);
     if (!nominal.ok || !peak.ok) return;
 
-    expect(nominal.match.samples.map((s) => s.t)).toEqual([0, 135]);
-    expect(peak.match.samples.map((s) => s.t)).toEqual([0, 135]);
+    const times = nominal.match.samples.map((s) => s.t);
+    expect(times[0]).toBe(0);
+    expect(times.at(-1)).toBe(135);
+    expect(times.length).toBeGreaterThan(2);
+    for (let i = 1; i < times.length; i += 1) {
+      expect(times[i]!).toBeGreaterThan(times[i - 1]!);
+    }
+    expect(peak.match.samples[0]?.t).toBe(0);
+    expect(peak.match.samples.at(-1)?.t).toBe(135);
     const nominalMin = Math.min(...nominal.match.samples.map((s) => s.systemVoltage));
     const peakMin = Math.min(...peak.match.samples.map((s) => s.systemVoltage));
     expect(peakMin).toBeLessThanOrEqual(nominalMin);
